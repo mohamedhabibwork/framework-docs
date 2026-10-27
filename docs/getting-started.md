@@ -1,0 +1,113 @@
+# Getting Started
+
+From zero to a running API with real PostgreSQL, auditing, events and queues.
+
+## Prerequisites
+
+| Tool                                         | Purpose                               |
+| -------------------------------------------- | ------------------------------------- |
+| [Bun](https://bun.sh) ≥ 1.4                  | Runtime, package manager, test runner |
+| Docker (or a PostgreSQL 17 + Redis 7 server) | Local infrastructure via compose      |
+
+## Path A — run the reference application (playground)
+
+```sh
+bun install                                          # install the framework workspace
+bun run db:up                                        # PostgreSQL :54329 + Redis :63799
+cp .env.test.example .env.test                       # TEST_DATABASE_URL for endpoint tests
+cp apps/playground/.env.example apps/playground/.env # DATABASE_URL for the app
+bun run cli -- db:migrate                            # apply migrations
+bun run dev                                          # http://127.0.0.1:3000
+```
+
+Try it:
+
+```sh
+curl -s localhost:3000/health/ready
+curl -s -X POST localhost:3000/api/v1/products -H 'content-type: application/json' \
+  -d '{"name":"coffee","price":"12.50"}'
+curl -s 'localhost:3000/api/v1/products?page=1&limit=10'
+curl -s 'localhost:3000/audit?resource=products&limit=5'
+```
+
+## Path B — generate your own application (one command)
+
+From the framework workspace root:
+
+```sh
+bun run cli -- create apps/my-api --with-demo
+```
+
+This single command generates the complete application (config, bootstrap,
+providers, health/audit/realtime routes, server/worker/CLI entry points,
+tests, compose file), installs dependencies through the workspace, and runs
+`make:crud` inside the new app to add a sample **products** module with its
+database migration and endpoint test suite.
+
+Then:
+
+```sh
+cd apps/my-api
+cp .env.example .env                                  # set DATABASE_URL / REDIS_URL
+docker compose -f deployment/compose.yaml up -d --wait
+bun run cli -- db:migrate                             # apply the generated migration
+bun run dev                                           # http://127.0.0.1:3000
+bun test                                              # endpoint suite on an isolated DB
+```
+
+Optional processes:
+
+```sh
+bun run worker        # queue worker (same as: bun run cli -- queue:work)
+```
+
+Without `--with-demo` you get the empty application; add modules when ready:
+
+```sh
+bun run cli -- make:crud Product --module products \
+  --fields 'name:text:required,price:numeric:required' --access public --verify
+```
+
+`--verify` typechecks the generated code and runs the generated endpoint
+suite against an isolated, migrated PostgreSQL database, then reports every
+tested route. Use `--dry-run` to preview every file change first.
+
+## What you get
+
+Every generated application ships with:
+
+| Surface                                        | Where               | Purpose                                                          |
+| ---------------------------------------------- | ------------------- | ---------------------------------------------------------------- |
+| `GET /health/live`, `GET /health/ready`        | `routes/health.ts`  | Liveness (no dependencies) and readiness (database ping)         |
+| `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action) |
+| `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                         |
+| `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation           |
+| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/`              | HTTP server, queue worker, application CLI                       |
+
+Event channels: `entity.created|updated|deleted|restored`, `import.*`,
+`export.*` — published on the in-process bus by default, or fanned out
+across instances with `EVENTS_DRIVER=redis`.
+
+## Repository layout
+
+```text
+apps/<your-app>/
+├── app/modules/<feature>/   # business modules (schemas, repository, service, routes…)
+├── app/providers/           # database + events providers
+├── app/jobs/                # queue job registry
+├── bootstrap/               # application, HTTP composition, middleware, OpenAPI
+├── config/                  # validated, environment-mapped configuration
+├── database/schema/         # canonical Drizzle tables (incl. framework audit_logs)
+├── database/migrations/     # reviewed SQL, applied by db:migrate
+├── routes/                  # API + health route composition
+└── bin/                     # server / worker / cli entry points
+```
+
+## Next steps
+
+- [CLI reference](cli-reference.md) — every command and option
+- [Authoring modules](modules.md) — the schema→validation→DTO pipeline, mixins, hooks
+- [Platform guide](platform.md) — context, errors, audit, events, queues, import/export
+- [Testing](testing.md) — isolated databases, endpoint suites, test modes
+- [Deployment](deployment.md) — processes, migrations as a release step, compose
+- [Implementation status](status.md) — what is validated vs planned

@@ -1,0 +1,227 @@
+---
+title: Notifications
+description: 'Multi-channel notifications with a per-channel delivery-status ledger and queued delivery.'
+---
+
+# Notifications
+
+What it is, how to wire it, and how to deliver across channels.
+
+`@framework/notifications` delivers a notification through explicit channels:
+`email` via the [Mail](/mail/) package, `database` via your own store, and
+`push`/`messaging` via NotifyKit providers. Every send validates an envelope,
+persists one record, and fans out per channel — recording a delivered or failed
+status per channel as it goes. A failure in one channel never blocks the
+others. SMS is planned but deliberately not implemented: the envelope schema
+rejects any channel outside the four above until an SMS dependency is chosen.
+
+> **Choosing between Mail and Notifications** — use [Mail](/mail/) when you need
+> a direct email transport: build a message, hand it to a transport, done. Use
+> Notifications when you need multi-channel delivery (email, database rows,
+> push, messaging), a persisted per-channel status ledger, or queued delivery
+> with retries over [Queues](/queues/). Notifications' email channel delivers
+> through the same `Mailer` — the framework keeps the email transport owned by
+> Mail.
+
+## Setup
+
+### Define notifications
+
+A notification declares the channels it may ever use, a zod payload schema, and
+one content builder per declared channel. `defineNotification` validates this
+up front, so a missing builder fails at definition time instead of first
+delivery:
+
+```ts
+import { defineNotification } from '@framework/notifications';
+import { z } from 'zod/v4';
+
+const welcome = defineNotification({
+  name: 'user.welcome',
+  channels: ['email', 'database'],
+  payload: z.object({ userName: z.string().min(1) }),
+  toEmail: (payload) => ({
+    subject: `Welcome ${payload.userName}`,
+    text: `Hello ${payload.userName}`,
+  }),
+  toDatabase: (payload) => ({
+    title: `Welcome ${payload.userName}`,
+    body: `Hello ${payload.userName}`,
+  }),
+});
+```
+
+Channel selection happens per send via the envelope; a send may pick any subset
+of the declared channels. A send selecting a channel the notification did not
+declare throws `NotificationChannelError` and nothing is fired.
+
+### Bind the store
+
+The framework does not own a notifications table. You implement
+`DatabaseChannelStore` — it doubles as the delivery-status ledger — on your own
+schema, and bind it under the `NOTIFICATION_STORE` token:
+
+```ts
+import { NOTIFICATION_STORE } from '@framework/notifications';
+
+defineProvider({
+  name: 'notification-store',
+  register({ container }) {
+    container.value(NOTIFICATION_STORE, new PostgresNotificationStore(sql));
+  },
+});
+```
+
+The four methods: `store(record)` persists the record and seeds `pending` per
+declared channel, `markDelivered`/`markFailed` transition one channel, and
+`status(id)` reads a record back. Retry contracts ride the queue; the store only
+records outcomes.
+
+### Provider registration
+
+`createNotificationsProvider` wires the `NotificationsService` to your bound
+`MAILER`, queue manager and store. Register it after the mail provider and your
+queue wiring; resolving the service without a bound store fails with
+`NOTIFICATION_STORE_UNBOUND`:
+
+```ts
+import { createNotificationsProvider, defineNotificationJob } from '@framework/notifications';
+
+const deliveryJob = defineNotificationJob({ attempts: 3, backoffMs: 5000 });
+
+export const notificationsProvider = createNotificationsProvider({
+  definitions: [welcome],
+  job: deliveryJob,
+});
+```
+
+If you use queued delivery, register the job on your worker too:
+
+```ts
+const worker = new JobWorker(manager, app, [deliveryJob]);
+worker.start();
+```
+
+## Sending
+
+### Inline
+
+`send` validates, persists the record (pending per channel), fans out, and
+returns the final per-channel status:
+
+```ts
+import { NOTIFICATIONS } from '@framework/notifications';
+
+const notifications = app.container.resolve(NOTIFICATIONS);
+const status = await notifications.send({
+  name: 'user.welcome',
+  channels: ['email', 'database'],
+  to: 'ada@example.com',
+  payload: { userName: 'Ada' },
+});
+```
+
+The envelope requires at least one channel and a JSON payload; the email
+channel additionally requires `to` to be a valid email address — database-only
+recipients may be any identifier. Payloads failing the notification's schema
+throw `NotificationValidationError` with 422-style field errors before anything
+runs, and unknown names throw `NOTIFICATION_UNKNOWN`.
+
+### Queued
+
+`sendQueued` validates, persists the pending record, and dispatches the
+built-in delivery job. The worker fans out under the queue's retry policy:
+
+```ts
+const { id, jobId } = await notifications.sendQueued(
+  { name: 'user.welcome', channels: ['email'], to: 'ada@example.com', payload: { userName: 'Ada' } },
+  { delayMs: 60_000 },
+);
+```
+
+Queued delivery is idempotent: the job's idempotency key collapses duplicate
+dispatches of the same record, and on resume (after a crash or a retry)
+channels already marked `delivered` are never re-sent. When a channel still
+fails after its attempt, the job throws `NOTIFICATION_DELIVERY_FAILED` — which
+is what triggers the next attempt per the queue's retry policy — and when
+attempts are exhausted the job ends failed with the channel status recorded as
+`failed`. Built content is embedded in the job payload, so what was queued is
+exactly what gets delivered, even across deploys.
+
+## Delivery status
+
+Read the ledger through the service; it delegates to your store:
+
+```ts
+const status = await notifications.status(id);
+// {
+//   id, name: 'user.welcome', recipient: 'ada@example.com', createdAt,
+//   channels: [
+//     { channel: 'email', state: 'delivered', reference: '<sent id>', updatedAt },
+//     { channel: 'database', state: 'failed', error: 'smtp down', updatedAt },
+//   ],
+// }
+```
+
+Each channel moves through `pending -> delivered | failed`. `reference` carries
+the transport's delivery id when delivered, `error` the root-cause message when
+failed — the service unwraps wrapper errors so the stored message shows what
+actually went wrong. Unknown ids return `null`.
+
+## Push and messaging
+
+The `push` and `messaging` channels delegate to NotifyKit providers configured
+under the `notifications.providers` section, passed to
+`createNotificationsProvider`. Push targets device-push providers
+(`fcm`, `apns`, `webpush`, `huawei`); messaging targets `telegram` and `slack`:
+
+```ts
+createNotificationsProvider({
+  definitions: [welcome],
+  job: deliveryJob,
+  providers: {
+    push: { type: 'fcm', options: { credential } },
+    messaging: { type: 'slack', options: { botToken: process.env.SLACK_BOT_TOKEN } },
+  },
+});
+```
+
+- `options` is forwarded verbatim to NotifyKit's `createNotifier` — it is that
+  provider's own contract.
+- Provider SDKs (`firebase-admin`, `web-push`, `@parse/node-apn`) are optional
+  peers loaded lazily when the notifier is first created. A missing peer, an
+  unknown provider type, or a type from the wrong channel's family surfaces as
+  `NOTIFICATION_PROVIDER_UNAVAILABLE` — fail fast, before anything is persisted.
+- The envelope's string `to` is provider-agnostic (device token, chat id,
+  channel id). Built-in providers map it to their documented recipient key by
+  default; pass `target` to override or to name the key for a custom provider.
+
+A `native` object on the envelope passes through verbatim as the provider's
+per-send options — for example `{ ttl: 3600, urgency: 'high' }` for push, or
+`native.keys` for `webpush` subscriptions. The envelope payload itself never
+leaves your process.
+
+## Testing
+
+Use `InMemoryNotificationStore` — the documented fake — and assert on exactly
+what the service persisted and recorded:
+
+```ts
+const store = new InMemoryNotificationStore();
+// …bind NOTIFICATION_STORE, then:
+await notifications.send({
+  name: 'user.welcome',
+  channels: ['email', 'database'],
+  to: 'ada@example.com',
+  payload: { userName: 'Ada' },
+});
+
+store.records(); // every stored record, oldest first
+const status = await notifications.status(id);
+expect(status?.channels.map((c) => c.state)).toEqual(['delivered', 'delivered']);
+```
+
+Failure isolation is easy to assert: arm your mail fake's one-shot failure and
+confirm the email channel ends `failed` with the root cause while the database
+channel still delivers. For queued semantics, the framework's own suites run
+against real Redis — the fake proves wiring, never retry behavior.

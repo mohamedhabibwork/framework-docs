@@ -1,0 +1,262 @@
+%% ============================================================================
+%% Laravel v13 Parity Framework (ORM excluded) — Class / Interface Diagram
+%% Grounded in the real repo: @framework/* packages + @mohamedhabibwork/* kits.
+%% Net-new classes are marked with a leading "<<new>>" stereotype note.
+%% ============================================================================
+
+classDiagram
+    direction LR
+
+    %% ------------------------------------------------------------------ CORE SEAMS
+    class Application {
+        +Container container
+        +TConfig config
+        +ApplicationState state
+        +boot() Promise~this~
+        +createScope(kind) Scope
+        +withScope(kind, work) Promise~T~
+        +shutdown() Promise~void~
+    }
+    class Container {
+        +bind(token, factory, options) this
+        +singleton(token, factory, dispose) this
+        +scoped(token, factory, dispose) this
+        +transient(token, factory) this
+        +value(token, instance) this
+        +resolve(token) T
+        +has(token) boolean
+        +createScope(kind) Scope
+    }
+    class Scope {
+        +override(token, value) this
+        +resolve(token) T
+        +dispose() Promise~void~
+    }
+    class ServiceProvider {
+        <<interface>>
+        +string name
+        +string[] dependsOn
+        +register(ctx) void
+        +boot(ctx) void
+        +shutdown(ctx) void
+    }
+    Application *-- Container
+    Container "1" o-- "*" Scope : creates
+    Application "1" o-- "*" ServiceProvider : orders/boots
+
+    %% ------------------------------------------------------------------ FEATURE BUILDER (net-new)
+    class FeatureRegistry {
+        <<new>>
+        -Map descriptors
+        +register(descriptor) FeatureRegistry
+        +get(name) FeatureDescriptor
+        +has(name) boolean
+        +all() FeatureDescriptor[]
+        +validate() void
+    }
+    class FeatureDescriptor {
+        <<new>>
+        +string name
+        +FeatureName[] requires
+        +ProviderFactory[] providers
+        +ConfigSectionRef configSection
+        +RouteFamilyRef[] routes
+        +string[] commands
+        +PackageRequirement[] packages
+        +string[] artifacts
+        +FeatureTier tier
+    }
+    class FeatureResolver {
+        <<new>>
+        +resolve(enabled) FeaturePlan
+        -assertKnown(names) void
+        -topoSort(names) FeatureName[]
+        -assertPrerequisites(names) void
+        -collectProviders(order) ProviderFactory[]
+    }
+    class FeaturePlan {
+        <<new>>
+        +FeatureName[] enabled
+        +FeatureName[] order
+        +FeatureName[] excluded
+        +ServiceProvider[] providers
+        +PackageRequirement[] packages
+        +string[] excludedPackages
+        +string[] commands
+        +string[] routeFamilies
+        +boolean isFullProfile()
+    }
+    class PackageRequirement {
+        <<new>>
+        +string name
+        +string version
+        +boolean workspace
+    }
+    class FeatureError {
+        <<new,error>>
+        +string code
+        +string[] missing
+    }
+    FeatureRegistry "1" o-- "*" FeatureDescriptor : holds
+    FeatureResolver --> FeatureRegistry : reads
+    FeatureResolver ..> FeaturePlan : produces
+    FeatureResolver ..> FeatureError : throws
+    FeaturePlan "1" o-- "*" PackageRequirement
+    FeaturePlan ..> ServiceProvider : selects
+
+    %% ------------------------------------------------------------------ KIT ABSTRACTION LAYER (net-new, D3)
+    class KitRegistry {
+        <<new>>
+        -Map adapters
+        +register(adapter) void
+        +adapterFor(port) KitAdapter
+        +capabilities(port) KitCapabilities
+    }
+    class KitAdapter {
+        <<new,interface>>
+        +string kit
+        +string version
+        +KitPortName port
+        +KitCapabilities capabilities
+        +create(options) unknown
+    }
+    class KitCapabilities {
+        <<new>>
+        +Map operations
+        +supports(op) CapabilityState
+        +assert(op) void
+    }
+    class CachePort {
+        <<new,interface>>
+        +get(key) Promise~unknown~
+        +set(key, value, ttl) Promise~void~
+        +delete(key) Promise~void~
+        +touch(key, ttl) Promise~boolean~
+        +capabilities() KitCapabilities
+    }
+    class StoragePort {
+        <<new,interface>>
+        +put(path, data) Promise~void~
+        +get(path) Promise~unknown~
+        +delete(path) Promise~void~
+        +signedUrl(path, ttl) Promise~string~
+    }
+    class QueueTransportPort {
+        <<new,interface>>
+        +enqueue(name, payload, opts) Promise~string~
+        +inspect(queue, opts) Promise~JobPage~
+        +retry(id) Promise~void~
+    }
+    class LoggerPort {
+        <<new,interface>>
+        +log(entry) void
+        +child(bindings) LoggerPort
+    }
+    class NotificationPort {
+        <<new,interface>>
+        +send(channel, message) Promise~DeliveryStatus~
+    }
+    KitRegistry "1" o-- "*" KitAdapter : binds
+    KitAdapter ..> KitCapabilities : declares
+    CachePort --|> KitAdapter : satisfied by
+    StoragePort --|> KitAdapter : satisfied by
+    QueueTransportPort --|> KitAdapter : satisfied by
+    LoggerPort --|> KitAdapter : satisfied by
+    NotificationPort --|> KitAdapter : satisfied by
+
+    %% Concrete kit adapters (existing, re-seated behind the port)
+    class CacheKitAdapter {
+        +kit = "cachekit@0.2.1"
+    }
+    class StorageKitAdapter {
+        +kit = "storagekit@0.6.1"
+    }
+    class QueueKitAdapter {
+        +kit = "queuekit@0.4.1"
+    }
+    class LoggerKitAdapter {
+        +kit = "loggerkit@0.2.2"
+    }
+    class NotifyKitAdapter {
+        +kit = "notifykit@0.4.1"
+    }
+    CacheKitAdapter ..|> CachePort
+    StorageKitAdapter ..|> StoragePort
+    QueueKitAdapter ..|> QueueTransportPort
+    LoggerKitAdapter ..|> LoggerPort
+    NotifyKitAdapter ..|> NotificationPort
+
+    %% ------------------------------------------------------------------ ONE-LINE CRUD (existing + net-new)
+    class ResourceBuilder {
+        <<new>>
+        +schema(cfg) ResourceBuilder
+        +access(mode) ResourceBuilder
+        +ownedBy(field) ResourceBuilder
+        +relations(map) ResourceBuilder
+        +softDelete() ResourceBuilder
+        +include(allowlist) ResourceBuilder
+        +filterSort(dsl) ResourceBuilder
+        +crud() ResourceRegistration
+    }
+    class ResourceRegistration {
+        <<new>>
+        +string name
+        +string basePath
+        +ServiceProvider provider
+        +RouteFamily routes
+        +OpenApiOperations operations
+    }
+    class ResourceService {
+        +list(req, query) Promise~Page~
+        +get(id) Promise~T~
+        +create(input) Promise~T~
+        +update(id, changes) Promise~T~
+        +delete(id) Promise~void~
+        +restore(id) Promise~T~
+        #beforeCreate(input) TCreate
+        #afterUpdate(entity) void
+    }
+    class ResourceController {
+        +list(req, query) Promise~PageResponse~
+        +show(id) Promise~TResponse~
+        +store(input) Promise~TResponse~
+        +update(id, input) Promise~TResponse~
+        +destroy(id) Promise~void~
+    }
+    class ResourceTransform {
+        <<new>>
+        +toArray(row) JsonObject
+        +collection(rows) JsonObject[]
+    }
+    class CrudRepository {
+        <<interface>>
+        +findById(id) Promise~T~
+        +paginate(req, query) Promise~Page~
+        +create(values) Promise~T~
+        +update(id, changes) Promise~T~
+        +delete(id) Promise~boolean~
+        +column(field) AnyPgColumn
+    }
+    ResourceBuilder ..> ResourceRegistration : produces
+    ResourceRegistration ..> ResourceService : binds
+    ResourceRegistration ..> ResourceController : binds
+    ResourceRegistration ..> ResourceTransform : binds
+    ResourceController --> ResourceService : delegates
+    ResourceService --> CrudRepository : uses
+    ResourceController ..> ResourceTransform : serializes via
+
+    %% ------------------------------------------------------------------ FULL CUSTOMIZATION: CONTRACT + DEFAULT BINDING + OVERRIDE
+    class Contract {
+        <<interface>>
+        +capabilities() CapabilityReport
+    }
+    class DefaultBinding {
+        +register(ctx) void
+    }
+    class AppOverride {
+        +register(ctx) void
+    }
+    Contract <|.. DefaultBinding : implemented by
+    Contract <|.. AppOverride : replaced by
+    ServiceProvider <|.. DefaultBinding
+    ServiceProvider <|.. AppOverride

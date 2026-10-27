@@ -1,0 +1,41 @@
+---
+title: الإطار (Framework)
+description: إطار عمل TypeScript مستوحى من Laravel مبني على Bun + Hono + Drizzle + Zod.
+template: splash
+hero:
+  tagline: واجهات برمجية آمنة الأنواع مع مولّدات CRUD، سجل تدقيق، أحداث، طوابير و OpenAPI — جاهز بالإعدادات الافتراضية.
+  actions:
+    - text: ابدأ من هنا
+      link: /ar/getting-started/
+      icon: right-arrow
+    - text: دوال المساعدة
+      link: /helpers/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## ما الذي يوفره الإطار
+
+<CardGrid stagger>
+  <Card title="إنشاء تطبيق بأمر واحد" icon="rocket">
+    ينشئ `bun run cli -- create apps/my-api --with-demo` تطبيقاً كاملاً — الإعدادات، المزوّدات، مسارات
+    health/audit/realtime، نقاط دخول الخادم والعامل وواجهة الأوامر — مع وحدة CRUD نموذجية.
+  </Card>
+  <Card title="مولّد CRUD" icon="pencil">
+    يولّد `make:crud` المخططات و DTOs والمستودعات والخدمات والمتحكمات والمسارات وبيانات OpenAPI واختبارات نقاط النهاية
+    من جدول Drizzle واحد — ثم يتحقق منها على PostgreSQL حقيقي.
+  </Card>
+  <Card title="دوال مساعدة بأسلوب Laravel" icon="puzzle">
+    `config()` و `env()` و `abort()` و `logger()` و `retry()` — دوال آمنة الأنواع تعرف سياق الطلب الحالي.
+  </Card>
+  <Card title="سجل التدقيق" icon="document">
+    كل عملية كتابة تُسجَّل في `audit_logs` ضمن نفس المعاملة — مع فروقات المستوى-الحقل والمنفّذ ومعرّف الارتباط.
+  </Card>
+  <Card title="الأحداث والزمن الحقيقي" icon="lightbulb">
+    ناقل أحداث بأنواع صريحة (ذاكرة أو Redis pub/sub) وبوابة WebSocket (`/ws`) بقنوات خاصة لكل مستخدم وبثّ الحضور.
+  </Card>
+  <Card title="الطوابير" icon="clock">
+    مهام BullMQ بحمولات مُتحقَّقة ومُصدَّرة الإصدار، مفاتيح idempotency، إعادة محاولة متدرجة، وعامل يفرغ نفسه بأمان.
+  </Card>
+</CardGrid>
