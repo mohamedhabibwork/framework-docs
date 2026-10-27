@@ -1,9 +1,7 @@
 ---
-title: Cache
-description: 'Application cache, distributed locks and rate limiting on one driver — memory for a single process, Redis for shared state.'
+title: 'Cache'
+description: 'Application cache, distributed locks and rate limiting on one driver: memory or Redis.'
 ---
-
-# Cache
 
 `@framework/cache` gives every module one application cache, one lock store
 and one rate limiter, all backed by the same driver: `memory` for a single
@@ -58,6 +56,24 @@ CACHE_PREFIX=playground            # namespace; several apps can share one Redis
 under `CACHE_PREFIX`, so a cache key can never collide with another
 application's keys on the same Redis.
 
+Engine-level options are forwarded to cachekit when the driver is created:
+
+```ts
+cache: {
+  driver: 'redis',
+  redis: { url: config.redis.url, prefix: config.cache.prefix },
+  options: {
+    defaultTtlSeconds: 300, // applied when set() omits a TTL
+    maxEntries: 10_000,     // memory driver only
+  },
+},
+```
+
+| Option              | Driver | Effect                                             |
+| ------------------- | ------ | -------------------------------------------------- |
+| `defaultTtlSeconds` | both   | TTL used when `set`/`setMany` pass no `ttlSeconds` |
+| `maxEntries`        | memory | Eviction bound for the in-process store            |
+
 ## Usage
 
 Resolve `CACHE` from a scope and use the map-style API. Keys live only in
@@ -88,6 +104,56 @@ Counters are atomic under concurrent writers and reject with
 `CACHE_VALUE_NOT_INTEGER` when the stored value is not an integer. A
 non-JSON-serializable value passed to `set` rejects with
 `CACHE_SERIALIZATION_FAILED` instead of storing garbage.
+
+### Options
+
+`set` takes either a bare TTL in seconds (the original signature) or a full
+options object; `get` accepts read options:
+
+```ts
+// Tags: group invalidation (memory driver; the Redis driver reports tags: false)
+await cache.set('product:42', product, { ttlSeconds: 300, tags: ['products', 'home'] });
+await cache.invalidateTags(['products']); // { invalidated: 2, mode: 'delete' }
+
+// Stale-while-revalidate: serve the old value while one caller refreshes
+await cache.set('catalog', snapshot, { ttlSeconds: 30, staleTtlSeconds: 300 });
+await cache.get('catalog'); // null once fresh TTL elapsed
+await cache.get('catalog', { allowStale: true }); // the stale value, if in window
+await cache.getOrSet('catalog', () => load(), {
+  ttlSeconds: 30,
+  staleTtlSeconds: 300,
+  serveStale: true, // don't block on the refresh
+});
+
+// Batches
+await cache.setMany([
+  { key: 'a', value: 1 },
+  { key: 'b', value: 2, options: { ttlSeconds: 60 } },
+]);
+await cache.getMany<number>(['a', 'b', 'missing']); // Map with the two hits
+await cache.deleteMany(['a', 'b']); // number removed
+
+// TTL extension and provider health
+await cache.touch('catalog', 600); // false when the key is gone
+await cache.health(); // { status, provider, latency, details? }
+```
+
+| Method           | Options                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `set`, `setMany` | `ttlSeconds`, `staleTtlSeconds`, `tags`, `signal`, `native` |
+| `get`, `getMany` | `allowStale`, `signal`, `native`                            |
+| `getOrSet`       | the `set` options plus `serveStale`                         |
+| `touch`          | `signal`, `native`                                          |
+
+`native` is forwarded to the cachekit engine and its provider (cachekit ships
+no native options today, so this exists for custom engines and future
+drivers). `native()` returns the provider client and rejects with
+`CACHE_UNSUPPORTED_OPERATION` on the memory driver, which has none.
+
+An option the driver cannot honour is rejected, never silently dropped:
+`invalidateTags` on the Redis driver fails with
+`CACHE_UNSUPPORTED_OPERATION` (its capability matrix reports `tags: false`),
+so a "cleared" tag can never hide stale data.
 
 ### Errors
 

@@ -1,9 +1,11 @@
 ---
 /**
- * `SiteTitle` component override: renders the site title followed by a small
- * docs-version pill linking to the versions page. This is the sanctioned
- * Starlight header slot chosen over a `ThemeSelect` override (which would
- * require reimplementing the theme switcher) — see astro.config.mjs.
+ * `SiteTitle` component override: the wordmark (ember prompt glyph + serif
+ * name) followed by a docs-version pill linking to the versions page.
+ *
+ * This is the sanctioned Starlight header slot, chosen over a `ThemeSelect`
+ * override (which would require reimplementing the theme switcher) — see
+ * astro.config.mjs.
  */
 import { docsVersions, formatLine } from '../data/versions';
 
@@ -11,8 +13,9 @@ const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
 const version = formatLine(docsVersions.latest);
 ---
 
-<a href={siteTitleHref} class="site-title sl-flex" translate="no">
-	<span>{siteTitle}</span>
+<a href={siteTitleHref} class="site-title" translate="no">
+	<span class="mark" aria-hidden="true">❯</span>
+	<span class="name">{siteTitle}</span>
 </a>
 <a class="version-pill" href="/versions/" aria-label={`Docs version ${version} — see all versions`}>
 	{version}
@@ -20,34 +23,58 @@ const version = formatLine(docsVersions.latest);
 
 <style>
 	.site-title {
-		align-items: center;
-		font-size: var(--sl-text-h4);
-		font-weight: 600;
-		color: var(--sl-color-text-accent);
-		text-decoration: none;
-		white-space: nowrap;
+		display: inline-flex;
+		align-items: baseline;
+		gap: 0.4rem;
 		min-width: 0;
+		text-decoration: none;
+		color: var(--text);
+		white-space: nowrap;
 	}
-	.site-title span {
+
+	.mark {
+		font-family: var(--fw-mono);
+		font-size: 0.9em;
+		font-weight: 500;
+		color: var(--ember);
+		translate: 0 -1px;
+	}
+
+	.name {
+		font-family: var(--fw-display);
+		font-size: 1.22rem;
+		font-weight: 600;
+		letter-spacing: -0.025em;
+		font-variation-settings: 'SOFT' 0, 'WONK' 1, 'opsz' 32;
 		overflow: hidden;
+		text-overflow: ellipsis;
 	}
+
+	.site-title:hover .name {
+		color: var(--accent);
+	}
+
 	.version-pill {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.25rem;
 		margin-inline-start: calc(var(--sl-nav-gap) / 2);
-		padding: 0.125rem 0.5rem;
-		border: 1px solid var(--sl-color-hairline-shade);
-		border-radius: 9999px;
-		font-size: var(--sl-text-xs);
+		padding: 0.1rem 0.45rem;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		background: var(--bg-raised);
+		font-family: var(--fw-mono);
+		font-size: 0.6875rem;
 		font-weight: 500;
-		color: var(--sl-color-white);
+		letter-spacing: 0.02em;
+		color: var(--text-muted);
 		text-decoration: none;
 		white-space: nowrap;
+		transition: color 160ms ease, border-color 160ms ease;
 	}
+
 	.version-pill:hover,
 	.version-pill:focus-visible {
-		border-color: var(--sl-color-text-accent);
-		color: var(--sl-color-text-accent);
+		border-color: var(--accent-border);
+		color: var(--accent);
 	}
 </style>

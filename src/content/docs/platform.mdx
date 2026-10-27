@@ -1,9 +1,7 @@
 ---
-title: Platform guide
-description: 'Request context, errors, pagination, audit, events, queues and import/export.'
+title: 'Platform guide'
+description: 'Request context, errors, pagination, filtering, audit trail, events, queues and import/export.'
 ---
-
-# Platform Guide
 
 The runtime services every module shares: request context, errors,
 pagination/filtering/sorting, audit, events & realtime, queues and
@@ -157,10 +155,34 @@ Or push to browsers via the generated `GET /ws` endpoint (protocol):
 → {"action":"unsubscribe","channel":"products"}
 ```
 
-Channels are allowlisted in `bootstrap/http.ts`
-(`realtimeRoutes({ hub, channels: ['events'] })`), with optional per-connection
-authorization and subscription limits. `Bun.serve({ websocket })` wiring is
-included in the generated server entry point.
+Channels are allowlisted when the gateway is configured, with optional
+per-connection authorization and subscription limits. `Bun.serve({
+websocket })` wiring is included in the generated server entry point.
+
+### WebSocket gateway (`/ws`)
+
+Generated applications and the playground serve a `WebsocketGateway` at
+`/ws` on top of that bus:
+
+- **Connection authentication** — `authenticate(c)` resolves the request
+  scope's actor (anonymous until the auth phase); returning null refuses the
+  socket with `4001`.
+- **Private user channels** — every authenticated actor is auto-subscribed to
+  `user.<id>`; server code pushes with `gateway.toUser(id, verb, payload, execution)`.
+- **Channel authorization** — `authorize(c, channel, actor)` per join,
+  on top of the allowlist.
+- **Presence** — joining/leaving a tracked channel broadcasts
+  `presence.joined` / `presence.left`; `gateway.online(channel)` lists who
+  is currently subscribed.
+
+```ts
+// bootstrap/http.ts (generated)
+application.container.resolve(WEBSOCKET_GATEWAY).routes();
+
+// server-side push from anywhere with a scope
+const gateway = scope.resolve(WEBSOCKET_GATEWAY);
+await gateway.toUser(order.ownerId, 'order.shipped', { orderId }, scope.resolve(EXECUTION_CONTEXT));
+```
 
 ## Queues (BullMQ + Redis)
 
@@ -196,6 +218,126 @@ carrying the dispatcher's actor/correlation id, enforces per-job timeouts,
 and drains gracefully on SIGTERM/SIGINT. Payloads are validated before
 enqueue _and_ before execution; unknown job names or version mismatches fail
 without retrying. `queue:status` shows counts per state.
+
+### Batches
+
+Fan out many jobs as one unit with batch bookkeeping in Redis:
+
+```ts
+const { batchId, jobIds } = await queue.dispatchBatch(resizeImage, payloads, execution, {
+  onComplete: { name: 'images.batch-done', version: 1, payload: { batchId, total: payloads.length } },
+});
+await queue.batchStatus(batchId); // running | completed | partially-failed | cancelled + counters
+await queue.batchFailures(batchId); // the failed jobs, for inspection/replay
+await queue.cancelBatch(batchId); // remaining jobs fail fast as unrecoverable
+```
+
+Counters move with atomic `HINCRBY`/`HSETNX` bookkeeping, so concurrent
+workers cannot lose updates, and the completion job fires exactly once.
+Retried jobs count once toward the batch (only terminal failures do).
+
+## Workflows (Pipeline → Stage → Action)
+
+`@framework/workflow` adds durable multi-step executions: Postgres persistence
+(`workflow_runs` + a `workflow_nodes` execution tree), BullMQ as transport,
+checkpoint/resume at every node, and saga compensation. The composition is
+Workflow → Pipeline → Stage → Action:
+
+```ts
+import { defineAction, defineStage, defineWorkflow, parallel } from '@framework/workflow';
+import { z } from 'zod/v4';
+
+const chargeCard = defineAction({
+  name: 'charge-card',
+  via: 'queue', // run as its own BullMQ job (default 'inline')
+  input: z.object({ orderId: z.string() }), // zod-validates the state slice
+  attempts: 3,
+  precheck: (state) => {
+    if (!state.reserved) throw new Error('not reserved');
+  },
+  run: (input) => ({ chargeId: `ch_${input.orderId}` }),
+  compensate: (state) => refund(state.chargeId), // runs newest-first on failure
+});
+
+export const orderFulfillment = defineWorkflow({
+  name: 'order-fulfillment',
+  version: 1,
+  input: z.object({ orderId: z.string() }), // seeds the run state
+  onFailure: 'compensate', // or 'halt'
+  stages: [
+    defineStage({ name: 'stock', actions: [reserveStock] }),
+    defineStage({ name: 'fulfill', actions: parallel([chargeCard, createShipment]) }),
+    defineStage({ name: 'notify', actions: [notify], when: (s) => Boolean(s.chargeId) }),
+  ],
+});
+```
+
+Stages are the checkpoint boundaries; they may gate with `precheck`, compose
+`actions` (sequential, or `parallel()` groups) or a default `run`, and park
+the whole run with `waitFor: { event: 'payment.succeeded', timeoutMs }` — a
+bridge on the event bus resumes the run when the event arrives (a sweep fails
+expired waits). Every transition is a conditional database update, so
+re-delivered jobs, crashes and concurrent workers converge instead of
+double-executing.
+
+Register definitions in a provider (`manager.register(...workflows)`), then
+dispatch from anywhere:
+
+```ts
+const { runId } = await manager.dispatch(orderFulfillment, { orderId }, execution);
+const status = await manager.status(runId); // run + full node tree
+await manager.cancel(runId); // or retry(runId, { fromNode }), resume(runId), prune(days)
+```
+
+**Workers**: merge the engine's internal jobs into the regular `JobWorker` —
+one process, one queue:
+
+```ts
+const engine = new WorkflowEngine(application, manager, queue, bus);
+const worker = new JobWorker(queue, application, [...jobs, ...engine.jobs], { concurrency: 4 });
+worker.start();
+engine.start(); // wait-for-event bridge + timeout sweep
+```
+
+Actions marked `via: 'queue'` and queued stages execute as their own BullMQ
+jobs (scaling horizontally for free); everything else runs inline inside the
+parent unit. Progress events publish on the aggregate `workflow` channel and
+the per-run `workflow.run.<runId>` channel — subscribe over `/ws` for live
+updates.
+
+**HTTP** (`workflowRoutes()`, mounted at `/admin/workflows` in the
+playground, outside the documented `/api` prefix like `/health`): `GET /`
+(paginated runs), `GET /:runId` (run + node tree), `POST
+/:runId/retry|cancel|resume`, `POST /dispatch`. Mounting requires an
+authorization decision: pass an `authorize` callback (a guard, an auth
+middleware or the explicit `'public'` opt-out) — the routes refuse to mount
+without one, so an admin surface can never be exposed by omission.
+
+**CLI**: `workflow:list`, `workflow:status <id-prefix>`,
+`workflow:retry <id> [--from <node path>]`, `workflow:cancel <id>`,
+`workflow:prune --days <n>`.
+
+## Scheduling (cron)
+
+`@framework/scheduler` registers cron timetables on BullMQ job schedulers and
+turns due fires into dispatched jobs or workflows:
+
+```ts
+import { defineSchedule } from '@framework/scheduler';
+
+export const nightlySummary = defineSchedule({
+  name: 'orders-nightly-summary',
+  cron: '0 3 * * *',
+  timezone: 'Europe/Berlin',
+  overlap: 'skip', // Redis lock until the next due run
+  dispatch: { kind: 'workflow', workflow: 'order-fulfillment', input: () => ({ orderId: 'nightly' }) },
+});
+```
+
+The scheduler process (`bin/scheduler.ts`, `schedule:work`) syncs the
+timetables and consumes fires on a dedicated `<queue>-schedules` queue —
+regular workers never see them. `schedule:list` shows timetables and their
+next due run; `schedule:run`/`schedule:test <name>` fire immediately.
 
 ## Import / export
 

@@ -1,45 +1,228 @@
 ---
 title: Framework
-description: Laravel-inspired TypeScript framework on Bun + Hono + Drizzle + Zod.
+description: Laravel-inspired TypeScript framework on Bun + Hono + Drizzle + Zod. One-command apps, CRUD generation, audit trail, queues, workflows and OpenAPI.
 template: splash
-hero:
-  tagline: Type-safe APIs with CRUD generators, an audit trail, events, queues and OpenAPI — batteries included, defaults that run.
-  actions:
-    - text: Get started
-      link: /getting-started/
-      icon: right-arrow
-    - text: CLI reference
-      link: /cli-reference/
-      variant: minimal
 ---
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import Hero from '../../components/landing/Hero.astro';
+import Feature from '../../components/landing/Feature.astro';
+import PackagePills from '../../components/landing/PackagePills.astro';
 
-## What's inside
+<div class="landing">
 
-<CardGrid stagger>
-  <Card title="One-command apps" icon="rocket">
-    `bun run cli -- create apps/my-api --with-demo` generates a complete application — config, providers,
-    health/audit/realtime routes, server, worker and CLI — and a sample CRUD module.
-  </Card>
-  <Card title="CRUD generator" icon="pencil">
-    `make:crud` derives schemas, DTOs, repositories, services, controllers, routes, OpenAPI metadata and endpoint tests
-    from one Drizzle table — then verifies them against real PostgreSQL.
-  </Card>
-  <Card title="Laravel-style helpers" icon="puzzle">
-    `config()`, `env()`, `abort()`, `logger()`, `retry()` and context helpers that know the current request — typed,
-    scope-aware, no globals.
-  </Card>
-  <Card title="Audit trail" icon="document">
-    Every write lands in `audit_logs` in the same transaction, with field-level diffs, actor and correlation id —
-    queryable over HTTP.
-  </Card>
-  <Card title="Events & realtime" icon="lightbulb">
-    A typed event bus (in-memory or Redis pub/sub) feeding WebSocket subscribers through a channel-allowlisted `/ws`
-    endpoint.
-  </Card>
-  <Card title="Queues" icon="clock">
-    BullMQ jobs with versioned, validated payloads, idempotency keys, retry with backoff, timeouts and a
-    graceful-draining worker.
-  </Card>
-</CardGrid>
+<Hero />
+
+<section aria-labelledby="features-title">
+  <div class="section-head">
+    <div>
+      <span class="section-kicker">What ships</span>
+      <h2 id="features-title">Batteries included, defaults that run</h2>
+    </div>
+    <p>
+      Every subsystem is wired, tested against real infrastructure and documented — no starter-kit archaeology required.
+    </p>
+  </div>
+  <div class="features">
+    <Feature icon="bolt" title="One-command applications">
+      <code>create --with-demo</code> scaffolds config, providers, health/audit/realtime routes, server, worker and CLI
+      entry points, a test suite and a sample module — then installs and migrates.
+    </Feature>
+    <Feature icon="table" title="CRUD from one table">
+      <code>make:crud</code> derives Drizzle–Zod schemas, DTOs, repository, service, controller, typed routes, OpenAPI
+      metadata and an endpoint suite, then verifies them on PostgreSQL.
+    </Feature>
+    <Feature icon="shield" title="Audited by default">
+      Every write lands in <code>audit_logs</code> inside the same transaction, with field-level diffs, actor and
+      correlation id — queryable over HTTP.
+    </Feature>
+    <Feature icon="flow" title="Queues, schedules, workflows">
+      BullMQ jobs with validated payloads and idempotency keys, cron schedules with distributed locks, and durable
+      workflows with saga compensation.
+    </Feature>
+    <Feature icon="key" title="Authentication that ships">
+      Sessions and personal API tokens, email verification, password recovery, TOTP two-step login, JWT/JWKS guards and
+      token abilities.
+    </Feature>
+    <Feature icon="schema" title="OpenAPI that cannot drift">
+      Operations derive from route metadata and Zod; <code>openapi:check</code> fails when the document and the live
+      route table disagree.
+    </Feature>
+  </div>
+</section>
+
+<section aria-labelledby="paths-title">
+  <div class="section-head">
+    <div>
+      <span class="section-kicker">Two ways in</span>
+      <h2 id="paths-title">Start from the template, or inside the workspace</h2>
+    </div>
+    <p>Both paths end in the same running API; pick the one that matches how you will ship.</p>
+  </div>
+  <div class="paths">
+    <article class="path">
+      <span class="path-step">Path A — standalone</span>
+      <h3>Clone the template repository</h3>
+      <p>
+        A standalone application with its own git history, Dockerfile and compose file. Framework packages resolve from
+        GitHub.
+      </p>
+      <pre>
+        <code>
+          <span class="prompt">$</span> gh repo create my-api --template mohamedhabibwork/framework-app --clone
+          <span class="prompt">$</span> cd my-api &amp;&amp; bun install
+          <span class="prompt">$</span> cp .env.example .env
+          <span class="prompt">$</span> docker compose -f deployment/compose.yaml up -d --wait
+          <span class="prompt">$</span> bun run cli -- db:migrate &amp;&amp; bun run dev
+        </code>
+      </pre>
+      <a href="/getting-started/#path-a--run-the-reference-application-playground">
+        Follow the standalone walkthrough
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          aria-hidden="true"
+        >
+          <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </a>
+    </article>
+    <article class="path">
+      <span class="path-step">Path B — monorepo</span>
+      <h3>Generate inside this workspace</h3>
+      <p>
+        Work against the framework source with one database for every app. This is how the reference playground and the
+        release gates run.
+      </p>
+      <pre>
+        <code>
+          <span class="prompt">$</span> bun install
+          <span class="prompt">$</span> bun run db:up
+          <span class="prompt">$</span> bun run cli -- create apps/my-api --with-demo
+          <span class="prompt">$</span> cd apps/my-api &amp;&amp; bun run dev
+        </code>
+      </pre>
+      <a href="/getting-started/#path-b--generate-your-own-application-one-command">
+        Follow the workspace walkthrough
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          aria-hidden="true"
+        >
+          <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </a>
+    </article>
+  </div>
+</section>
+
+<section aria-labelledby="packages-title">
+  <div class="section-head">
+    <div>
+      <span class="section-kicker">Composable by design</span>
+      <h2 id="packages-title">25 packages, one contract</h2>
+    </div>
+    <p>
+      Each package is a standalone repository synced from this monorepo — install only what you need, or take the whole
+      stack.
+    </p>
+  </div>
+  <PackagePills />
+  <p style="margin-block-start:1rem">
+    <a href="/packages/">See the full package catalog →</a>
+  </p>
+</section>
+
+<nav class="docs-map" aria-label="Documentation map">
+  <div>
+    <h3>Start</h3>
+    <ul>
+      <li>
+        <a href="/getting-started/">Getting started</a>
+      </li>
+      <li>
+        <a href="/cli-reference/">CLI reference</a>
+      </li>
+      <li>
+        <a href="/packages/">Package catalog</a>
+      </li>
+      <li>
+        <a href="/helpers/">Helpers</a>
+      </li>
+    </ul>
+  </div>
+  <div>
+    <h3>Build</h3>
+    <ul>
+      <li>
+        <a href="/modules/">Authoring modules</a>
+      </li>
+      <li>
+        <a href="/platform/">Platform guide</a>
+      </li>
+      <li>
+        <a href="/authentication/">Authentication</a>
+      </li>
+      <li>
+        <a href="/search/">Search</a>
+      </li>
+      <li>
+        <a href="/queues/">Queues</a>
+      </li>
+      <li>
+        <a href="/workflows/">Workflows</a>
+      </li>
+    </ul>
+  </div>
+  <div>
+    <h3>Operate</h3>
+    <ul>
+      <li>
+        <a href="/testing/">Testing</a>
+      </li>
+      <li>
+        <a href="/deployment/">Deployment</a>
+      </li>
+      <li>
+        <a href="/ai/">AI integration</a>
+      </li>
+      <li>
+        <a href="/status/">Implementation status</a>
+      </li>
+    </ul>
+  </div>
+  <div>
+    <h3>Reference</h3>
+    <ul>
+      <li>
+        <a href="/errors/">Error codes</a>
+      </li>
+      <li>
+        <a href="/oauth-server/">OAuth server</a>
+      </li>
+      <li>
+        <a href="/decisions/">Architecture decisions</a>
+      </li>
+      <li>
+        <a href="/releases/">Releases</a>
+      </li>
+    </ul>
+  </div>
+</nav>
+
+<div class="landing-foot">
+  <span>MIT licensed · Built with Bun, Hono, Drizzle and Zod.</span>
+  <span>
+    <a href="https://github.com/mohamedhabibwork/framework">GitHub</a> ·
+    <a href="https://github.com/mohamedhabibwork/framework-app">Template repo</a>
+  </span>
+</div>
+
+</div>

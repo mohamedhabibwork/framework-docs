@@ -21,7 +21,9 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt",
-    "format:check": "oxfmt --check"
+    "format:check": "oxfmt --check",
+    "sync": "bun scripts/sync-docs.ts",
+    "check": "bun scripts/check-docs.ts"
   },
   "dependencies": {
     "@astrojs/mdx": "^8.0.3",

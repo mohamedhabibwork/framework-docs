@@ -1,9 +1,7 @@
 ---
-title: Storage
-description: 'File storage disks with visibility separation, path safety and a multi-driver configuration.'
+title: 'Storage'
+description: 'File storage disks with visibility separation, path safety and multi-driver configuration.'
 ---
-
-# Storage
 
 `@framework/storage` gives every module one `StorageDisk` contract for reading
 and writing files: put/get/stream, copy/move, bounded listing and public
@@ -51,12 +49,30 @@ The `storage` section itself:
 storage: {
   default: 'local',
   disks: {
-    local: { driver: 'local', root: './storage/app/private', visibility: 'private' },
+    local: {
+      driver: 'local',
+      root: './storage/app/private',
+      visibility: 'private',
+      // Extra storagekit local options (permissions, createDirectories, prefix, …)
+      options: { permissions: 0o600 },
+    },
     public: {
       driver: 'local',
       root: './storage/app/public',
       visibility: 'public',
       publicBaseUrl: '/storage', // or 'https://cdn.example.com/files'
+    },
+    assets: {
+      driver: 's3',                    // or minio, azure, gcs, oracle, rustfs, r2
+      visibility: 'private',
+      // Forwarded verbatim to storagekit's createStorage for this driver:
+      // bucket, region, endpoint, credentials, forcePathStyle, prefix,
+      // publicUrlBase, client, clientOptions, native-only fields, …
+      options: {
+        bucket: 'assets',
+        region: 'eu-central-1',
+        prefix: 'uploads/',
+      },
     },
   },
 },
@@ -69,6 +85,11 @@ Rules enforced at boot:
   public URL.
 - `root` may be absolute or relative to the process cwd and is created on
   first use.
+- `options` is the storagekit config for that driver (minus `type`, which is
+  the `driver` field). The kit validates it when the disk is created; a missing
+  peer SDK or bad option surfaces as `STORAGE_DRIVER_UNAVAILABLE` at boot, never
+  as a module-not-found crash. For `local`, the framework owns `root`, so an
+  `options.root` is ignored.
 
 ## Usage
 
@@ -103,12 +124,76 @@ await disk.delete('docs/hello.txt'); // deleting a missing path is a no-op
 // Bounded recursive listing under a prefix
 const paths = await disk.list('docs'); // sorted; default limit 100
 const first50 = await disk.list('docs', { limit: 50 });
+
+// Cursor paging for large prefixes
+const page = await disk.listPage('docs', { limit: 100 });
+if (page.hasMore) await disk.listPage('docs', { limit: 100, cursor: page.cursor });
 ```
 
-Listing is bounded by design: entries beyond the limit are dropped and there
-is no pagination — narrow the prefix instead (limits outside 1–1000 reject
-with `STORAGE_LIST_LIMIT_INVALID`). Reads, sizes, moves and copies of missing
-paths reject with `STORAGE_FILE_NOT_FOUND`; an unknown prefix lists empty.
+`list` is bounded by design: it walks until it has `limit` entries and stops
+(limits outside 1–1000 reject with `STORAGE_LIST_LIMIT_INVALID`). `listPage`
+maps onto the driver's own pagination and returns `{ files, cursor, hasMore }`.
+Reads, sizes, moves and copies of missing paths reject with
+`STORAGE_FILE_NOT_FOUND`; an unknown prefix lists empty.
+
+### Operation options
+
+Every operation accepts the storagekit option for its kind, so nothing the
+driver supports is out of reach:
+
+```ts
+// Upload: content type, user metadata, headers, conflict handling, multipart
+await disk.put('reports/q1.csv', csv, {
+  contentType: 'text/csv',
+  metadata: { owner: 'finance' },
+  cacheControl: 'private, max-age=60',
+  contentDisposition: 'attachment; filename="q1.csv"',
+  overwrite: false, // fails with STORAGE_FILE_EXISTS when present
+  multipart: { partSize: 8 * 1024 * 1024, concurrency: 4 },
+});
+
+// Read: a specific version, a byte range, or a cancellation signal
+await disk.get('reports/q1.csv', { versionId: 'v2' });
+await disk.get('reports/q1.csv', { range: { offset: 0, length: 1024 } });
+await disk.stream('reports/q1.csv', { signal: controller.signal });
+
+// Copy/move: overwrite policy plus the metadata the destination should carry
+await disk.copy('a.csv', 'b.csv', { overwrite: false, metadata: { source: 'a' } });
+await disk.move('b.csv', 'c.csv', { contentType: 'text/csv' });
+
+// Signed URLs: verb and lifetime (a bare number still means "expiresIn")
+await disk.signedUrl('reports/q1.csv', { action: 'read', expiresIn: 300 });
+await disk.signedUrl('reports/q1.csv', 300);
+```
+
+| Operation          | Options                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put`              | `visibility`, `contentType`, `metadata`, `cacheControl`, `contentDisposition`, `contentEncoding`, `overwrite`, `multipart`, `signal`, `native` |
+| `get`, `stream`    | `versionId`, `range` (`{ offset, length? }`), `signal`, `native`                                                                               |
+| `delete`           | `versionId`, `signal`, `native`                                                                                                                |
+| `exists`, `size`   | `versionId`, `signal`, `native`                                                                                                                |
+| `list`, `listPage` | `limit`, `cursor`, `recursive`, `signal`, `native`                                                                                             |
+| `copy`             | `overwrite`, `contentType`, `metadata`, `cacheControl`, `contentDisposition`, `contentEncoding`, `signal`, `native`                            |
+| `move`             | `overwrite`, `contentType`, `metadata`, `signal`, `native`                                                                                     |
+| `signedUrl`        | `action` (`read`/`write`/`delete`), `expiresIn`, `signal`, `native`                                                                            |
+
+`native` is the escape hatch: anything the framework does not model (S3
+`StorageClass`, `ServerSideEncryption`, `ACL`, Azure `tier`, GCS
+`predefinedAcl`, …) travels in that bag, typed by storagekit per driver.
+
+### The native client
+
+For SDK calls the contract does not wrap, resolve the driver client directly:
+
+```ts
+const client = await disk.native(); // S3Client, BlobServiceClient, …
+const etags = await disk.nativeRequest(async (s3) => {
+  /* typed by the driver; framework path guards do not apply here */
+});
+```
+
+`native()`/`nativeRequest()` are kit-backed on every driver; operations issued
+through them bypass the framework's path guard and error mapping on purpose.
 
 ### Uploads
 

@@ -1,0 +1,186 @@
+---
+title: 'Search'
+description: 'Declarative indexes, memory and PostgreSQL drivers, event-driven indexing and rebuilds.'
+---
+
+`@framework/search` is the Scout equivalent: a declarative index per table, a
+driver-based engine, and indexing that rides the event bus you already have —
+no second queue, no second worker, no duplicate model.
+
+Two drivers ship today:
+
+| Driver     | Storage                              | Use it for                              |
+| ---------- | ------------------------------------ | --------------------------------------- |
+| `memory`   | In-process maps                      | Development and tests (no persistence)  |
+| `postgres` | One `tsvector` + GIN table per index | Production without extra infrastructure |
+
+Both report capabilities honestly rather than faking features (ADR-11): full
+text and filters are supported, typo tolerance and facets are not. `search:status`
+prints the matrix for the configured driver.
+
+## Configuration
+
+Compose the validated section into the application config:
+
+```ts
+// config/index.ts
+import { searchConfigSchema } from '@framework/search';
+
+export const configSchema = z.object({
+  // …
+  search: searchConfigSchema.default({}),
+});
+```
+
+```ts
+// defaults
+{
+  driver: 'memory',        // 'memory' | 'postgres'
+  indexing: 'queued',      // 'queued' | 'inline'
+  prefix: 'search_',       // physical table prefix (postgres driver)
+  language: 'english',     // regconfig used by to_tsvector
+  indexes: [],             // declarations the CLI can index/status/flush
+}
+```
+
+Then bind the provider (registers `SEARCH_MANAGER` and `SEARCH_ENGINE` as
+singletons; engines are built lazily, so the Postgres driver only touches the
+database when it is first used):
+
+```ts
+import { createSearchProvider } from '@framework/search';
+
+providers.push(createSearchProvider<AppConfig>());
+```
+
+The Postgres driver owns its tables: `search_<index>` is created on first use
+with a GIN index over the generated `tsvector`. They are derived, rebuildable
+storage — never edit them by hand, and never put business columns in them.
+
+## Declaring an index
+
+An index says **what** is searchable; it does not touch the database.
+
+```ts
+import { defineSearchIndex } from '@framework/search';
+import { products } from '../../database/schema/products';
+
+export const productIndex = defineSearchIndex({
+  name: 'products', // the channel name and the engine key
+  source: products, // the table rows are projected from
+  searchable: ['name', 'description'],
+  filterable: ['status'],
+  softDelete: true, // exclude rows whose deletedAt is set
+});
+```
+
+`project` can override the default projection (the union of searchable +
+filterable fields) when the indexed document should differ from the row:
+
+```ts
+export const productIndex = defineSearchIndex({
+  name: 'products',
+  source: products,
+  searchable: ['name'],
+  project: (row) => ({ id: row.id, fields: { name: row.name, price: String(row.price) } }),
+});
+```
+
+Inside a repository, the `Searchable` mixin attaches the same declaration so the
+index travels with the model:
+
+```ts
+import { Creatable, Deletable, Readable, RepositoryCore, Updatable } from '@framework/database';
+import { Searchable } from '@framework/search';
+
+export class ProductRepository extends Searchable(
+  Deletable(Updatable(Creatable(Readable(RepositoryCore<typeof products>)))),
+  { name: 'products', searchable: ['name', 'description'], softDelete: true },
+) {}
+```
+
+## Querying
+
+```ts
+import { SEARCH_ENGINE } from '@framework/search';
+
+const engine = container.resolve(SEARCH_ENGINE);
+const result = await engine.search('products', {
+  term: 'coffee',
+  filters: { status: 'active' },
+  limit: 20,
+});
+
+result.hits; // [{ id, score, document }]
+result.total;
+result.capabilities; // what this driver actually supports
+```
+
+Pagination goes through the same `Page` contract as the rest of the framework:
+
+```ts
+const page = await engine.paginate('products', { term: 'coffee' }, { page: 1, limit: 20 });
+```
+
+`assertQuerySupported(engine, query)` is called for you: asking a driver for a
+capability it does not have raises `CAPABILITY_UNSUPPORTED` (501) instead of
+returning silently wrong results. `manager.engine('memory')` resolves a specific
+driver when a test needs one; `manager.register(name, factory)` adds an optional
+peer backend.
+
+## Keeping the index in sync
+
+The `Indexer` subscribes to the existing `@framework/events` bus on the index's
+resource channel (`products`) and reacts to the four write events:
+
+| Event               | Operation                              |
+| ------------------- | -------------------------------------- |
+| `products.created`  | upsert the projected document          |
+| `products.updated`  | upsert the projected document          |
+| `products.restored` | upsert (clears the soft-delete marker) |
+| `products.deleted`  | remove the document by id              |
+
+```ts
+import { Indexer, defineIndexJob } from '@framework/search';
+
+const indexer = new Indexer({ bus, enqueue, inline });
+await indexer.register(productIndex, { inline: config.search.indexing === 'inline' });
+```
+
+`indexing: 'queued'` (the default) dispatches `defineIndexJob()` payloads onto
+the queue, so a slow engine never blocks a request; `indexing: 'inline'` applies
+the write immediately, which is what tests want. Because indexing is
+event-driven, a module that already publishes entity events is searchable
+without changes.
+
+## Rebuilding an index
+
+Indexes are derived storage, so a rebuild is always safe:
+
+```sh
+bun run cli -- search:status                      # driver, capabilities, declared indexes
+bun run cli -- search:index                       # import every declared index
+bun run cli -- search:index products --dry-run    # count what would be written
+bun run cli -- search:flush products              # truncate one index
+```
+
+The CLI reads the `search.indexes` declarations, projects rows with the same
+function the runtime uses (`projectSearchDocument`), and refuses to run against
+the `memory` driver — it lives inside one process, so a CLI index write would
+vanish with the process (exit code `3`, with an actionable hint).
+
+## Limits
+
+- No typo tolerance, no facets, no external engines (Meilisearch, Typesense).
+  The `SearchEngine` contract and `manager.register` exist so a peer package can
+  add one without changing application code.
+- `filters` are exact matches on `filterable` fields; range queries and boolean
+  composition are not part of `SearchQuery` yet.
+- Soft-deleted rows are filtered at query time through the reserved marker, not
+  deleted from the index.
+
+## Related
+
+- [Platform guide](/platform/) — events, queue dispatch, pagination
+- [Queues](/queues/) — the transport used by queued indexing
+- [Testing](/testing/) — running the memory driver in endpoint suites

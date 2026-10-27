@@ -1,0 +1,56 @@
+---
+/**
+ * Landing hero: positioning copy on the left, a terminal transcript on the
+ * right. The transcript is the fastest way to show what the framework does —
+ * it is real output from the quickstart, not a marketing abstraction.
+ *
+ * Static by design (no client JS): the only motion is a CSS caret blink, which
+ * is disabled under `prefers-reduced-motion`.
+ */
+import { docsVersions, formatLine } from '../../data/versions';
+
+const version = formatLine(docsVersions.latest);
+---
+
+<section class="hero" aria-labelledby="hero-title">
+	<div class="hero-copy">
+		<span class="eyebrow">{version} · Bun + Hono + Drizzle + Zod</span>
+		<h1 id="hero-title"><span class="nowrap">The Laravel-shaped</span> framework for <em>TypeScript</em>.</h1>
+		<p class="hero-tagline">
+			One command generates an application, a module and its endpoint tests. Every write is audited, every route is
+			typed, and nothing is verified against a mock — the suite runs on real PostgreSQL and Redis.
+		</p>
+		<div class="hero-actions">
+			<a class="btn btn-primary" href="/getting-started/">
+				Start building
+				<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+					<path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke-linecap="round" stroke-linejoin="round"></path>
+				</svg>
+			</a>
+			<a class="btn btn-ghost" href="/cli-reference/">Browse the CLI</a>
+		</div>
+		<p class="hero-meta">
+			<span>25 packages</span>
+			<span>MIT licensed</span>
+			<span>Postgres + Redis</span>
+		</p>
+	</div>
+
+	<figure class="terminal" aria-label="Terminal: creating and starting a new application">
+		<div class="terminal-bar" aria-hidden="true">
+			<span class="terminal-dot"></span>
+			<span class="terminal-dot"></span>
+			<span class="terminal-dot"></span>
+			<span class="terminal-label">zsh — my-api</span>
+		</div>
+		<pre><code><span class="prompt">$</span> <span class="cmd">bun run cli -- create apps/my-api --with-demo</span>
+<span class="ok">✔</span> application scaffolded        <span class="comment">config, providers, routes, bins</span>
+<span class="ok">✔</span> products module generated     <span class="comment">9 artifacts + migration</span>
+<span class="ok">✔</span> endpoint suite green           <span class="comment">real PostgreSQL</span>
+
+<span class="prompt">$</span> <span class="cmd">bun run cli -- db:migrate && bun run dev</span>
+<span class="url">➜ http://127.0.0.1:3000</span>          <span class="comment">/health/ready · /api/v1/products</span>
+
+<span class="prompt">$</span> <span class="caret" aria-hidden="true"></span></code></pre>
+	</figure>
+</section>

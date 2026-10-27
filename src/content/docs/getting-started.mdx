@@ -1,23 +1,30 @@
 ---
-title: Getting started
-description: 'From zero to a running API: the reference app and generated applications.'
+title: 'Getting started'
+description: 'From zero to a running API: the reference app, generated apps and what ships with them.'
 ---
 
-# Getting Started
-
-From zero to a running API with real PostgreSQL, auditing, events and queues.
+From an empty machine to a running API with real PostgreSQL, an audit trail,
+events and queues — in two commands.
 
 ## Prerequisites
 
-| Tool                                         | Purpose                               |
-| -------------------------------------------- | ------------------------------------- |
-| [Bun](https://bun.sh) ≥ 1.4                  | Runtime, package manager, test runner |
-| Docker (or a PostgreSQL 17 + Redis 7 server) | Local infrastructure via compose      |
+| Tool                                        | Version               | Why                                                 |
+| ------------------------------------------- | --------------------- | --------------------------------------------------- |
+| [Bun](https://bun.sh)                       | ≥ 1.4                 | Runtime, package manager, test runner, bundler      |
+| Docker (or PostgreSQL 17 + Redis 7 servers) | Compose v2            | Local infrastructure via `deployment/compose.yaml`  |
+| Node.js                                     | ≥ 22.23.4 (docs only) | Astro 7 requires it to build the documentation site |
 
-## Path A — run the reference application (playground)
+Application code runs on Bun only. Node is needed solely for `bun run docs:dev`
+and `bun run docs:build`; the framework does not support a Node runtime yet
+(see [Implementation status](/status/#known-limitations)).
+
+## Path A — run the reference application
+
+The playground is a complete application: a `products` module with tests, auth
+tables, workflows, schedules and seeders.
 
 ```sh
-bun install                                          # install the framework workspace
+bun install                                          # install the workspace
 bun run db:up                                        # PostgreSQL :54329 + Redis :63799
 cp .env.test.example .env.test                       # TEST_DATABASE_URL for endpoint tests
 cp apps/playground/.env.example apps/playground/.env # DATABASE_URL for the app
@@ -25,45 +32,51 @@ bun run cli -- db:migrate                            # apply migrations
 bun run dev                                          # http://127.0.0.1:3000
 ```
 
-Try it:
+Prove it works:
 
 ```sh
-curl -s localhost:3000/health/ready
-curl -s -X POST localhost:3000/api/v1/products -H 'content-type: application/json' \
+curl -s localhost:3000/health/live                   # {"status":"ok"}
+curl -s localhost:3000/health/ready                  # database + Redis + queue
+curl -s -X POST localhost:3000/api/v1/products \
+  -H 'content-type: application/json' \
   -d '{"name":"coffee","price":"12.50"}'
 curl -s 'localhost:3000/api/v1/products?page=1&limit=10'
 curl -s 'localhost:3000/audit?resource=products&limit=5'
 ```
 
-## Path B — generate your own application (one command)
+The write appears in `/audit` because the audit row is inserted in the same
+transaction as the product — that is the framework's default, not an add-on.
 
-From the framework workspace root:
+## Path B — generate your own application
+
+From the workspace root:
 
 ```sh
 bun run cli -- create apps/my-api --with-demo
 ```
 
-This single command generates the complete application (config, bootstrap,
-providers, health/audit/realtime routes, server/worker/CLI entry points,
-tests, compose file), installs dependencies through the workspace, and runs
-`make:crud` inside the new app to add a sample **products** module with its
-database migration and endpoint test suite.
+One command generates the complete application — config, bootstrap, providers,
+health/audit/realtime routes, server/worker/CLI entry points, tests, compose
+file — installs dependencies through the workspace, and runs `make:crud` inside
+the new app to add a sample **products** module with its migration and endpoint
+suite.
 
 Then:
 
 ```sh
 cd apps/my-api
-cp .env.example .env                                  # set DATABASE_URL / REDIS_URL
+cp .env.example .env                                 # DATABASE_URL / REDIS_URL
 docker compose -f deployment/compose.yaml up -d --wait
-bun run cli -- db:migrate                             # apply the generated migration
-bun run dev                                           # http://127.0.0.1:3000
-bun test                                              # endpoint suite on an isolated DB
+bun run cli -- db:migrate                            # apply the generated migration
+bun run dev                                          # http://127.0.0.1:3000
+bun test                                             # endpoint suite on an isolated DB
 ```
 
 Optional processes:
 
 ```sh
-bun run worker        # queue worker (same as: bun run cli -- queue:work)
+bun run worker     # queue worker (same as: bun run cli -- queue:work)
+bun run schedule   # cron runner (when the app defines schedules)
 ```
 
 Without `--with-demo` you get the empty application; add modules when ready:
@@ -73,32 +86,31 @@ bun run cli -- make:crud Product --module products \
   --fields 'name:text:required,price:numeric:required' --access public --verify
 ```
 
-`--verify` typechecks the generated code and runs the generated endpoint
-suite against an isolated, migrated PostgreSQL database, then reports every
-tested route. Use `--dry-run` to preview every file change first.
+`--verify` typechecks the generated code, runs the generated endpoint suite
+against an isolated, migrated PostgreSQL database, and reports every tested
+route. `--dry-run` previews every file change first. See the
+[CLI reference](/cli-reference/#makecrud-resource) for the full option list.
 
 ## What you get
 
-Every generated application ships with:
-
-| Surface                                        | Where               | Purpose                                                          |
-| ---------------------------------------------- | ------------------- | ---------------------------------------------------------------- |
-| `GET /health/live`, `GET /health/ready`        | `routes/health.ts`  | Liveness (no dependencies) and readiness (database ping)         |
-| `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action) |
-| `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                         |
-| `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation           |
-| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/`              | HTTP server, queue worker, application CLI                       |
+| Surface                                        | Where               | Purpose                                                           |
+| ---------------------------------------------- | ------------------- | ----------------------------------------------------------------- |
+| `GET /health/live`, `GET /health/ready`        | `routes/health.ts`  | Liveness (no dependencies) and readiness (database, Redis, queue) |
+| `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action)  |
+| `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                          |
+| `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation            |
+| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/`              | HTTP server, queue worker, application CLI                        |
 
 Event channels: `entity.created|updated|deleted|restored`, `import.*`,
-`export.*` — published on the in-process bus by default, or fanned out
-across instances with `EVENTS_DRIVER=redis`.
+`export.*` — published on the in-process bus by default, or fanned out across
+instances with `EVENTS_DRIVER=redis`.
 
 ## Repository layout
 
 ```text
 apps/<your-app>/
 ├── app/modules/<feature>/   # business modules (schemas, repository, service, routes…)
-├── app/providers/           # database + events providers
+├── app/providers/           # database, events, cache, storage, mail providers
 ├── app/jobs/                # queue job registry
 ├── bootstrap/               # application, HTTP composition, middleware, OpenAPI
 ├── config/                  # validated, environment-mapped configuration
@@ -108,11 +120,29 @@ apps/<your-app>/
 └── bin/                     # server / worker / cli entry points
 ```
 
+## When it does not start
+
+| Symptom                                           | Cause                                        | Fix                                                                                      |
+| ------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `/health/ready` returns `503 SERVICE_UNAVAILABLE` | Database or Redis is not reachable           | `bun run db:up`, then `docker compose -f deployment/compose.yaml ps`                     |
+| `db:migrate` cannot connect                       | `DATABASE_URL` missing or wrong port         | `cp .env.example .env`; the compose port is `54329`                                      |
+| Tests fail with "TEST_DATABASE_URL is required"   | No `.env.test`                               | `cp .env.test.example .env.test`; it must point at a test server, never the app database |
+| `EADDRINUSE :3000`                                | Another process owns the port                | `bun run cli -- serve --port 3001`                                                       |
+| CLI exits with `2`                                | Invalid usage (bad flag or missing argument) | `bun run cli -- <command> --help`                                                        |
+| CLI exits with `3`                                | Capability not supported by the backend      | The message names the missing provider or driver                                         |
+| `docs:build` complains about Node                 | Astro 7 needs Node ≥ 22.23.4                 | Build the docs with a newer Node; app code still runs on Bun                             |
+
+Two commands diagnose most of it:
+
+```sh
+bun run cli -- doctor --connections   # config validation + connectivity probes
+bun run cli -- config:show database   # resolved config, secrets redacted
+```
+
 ## Next steps
 
 - [CLI reference](/cli-reference/) — every command and option
-- [Authoring modules](/modules/) — the schema→validation→DTO pipeline, mixins, hooks
+- [Authoring modules](/modules/) — the schema → validation → DTO pipeline
 - [Platform guide](/platform/) — context, errors, audit, events, queues, import/export
-- [Testing](/testing/) — isolated databases, endpoint suites, test modes
-- [Deployment](/deployment/) — processes, migrations as a release step, compose
-- [Implementation status](/status/) — what is validated vs planned
+- [Testing](/testing/) — isolated databases and endpoint suites
+- [Deployment](/deployment/) — processes, migrations as a release step

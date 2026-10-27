@@ -1,9 +1,7 @@
 ---
-title: Notifications
+title: 'Notifications'
 description: 'Multi-channel notifications with a per-channel delivery-status ledger and queued delivery.'
 ---
-
-# Notifications
 
 What it is, how to wire it, and how to deliver across channels.
 
@@ -200,6 +198,41 @@ A `native` object on the envelope passes through verbatim as the provider's
 per-send options — for example `{ ttl: 3600, urgency: 'high' }` for push, or
 `native.keys` for `webpush` subscriptions. The envelope payload itself never
 leaves your process.
+
+When one notification goes out on both kit channels, their options differ, so
+`nativeByChannel` overrides the shared bag per channel:
+
+```ts
+await notifications.send({
+  name: 'release.published',
+  channels: ['push', 'messaging'],
+  to: 'device-token-or-chat-id',
+  payload: { version: '0.2.0' },
+  native: { collapseKey: 'release' }, // applies to both by default
+  nativeByChannel: {
+    push: { ttl: 600, urgency: 'high' }, // FCM/APNs options
+    messaging: { parse_mode: 'HTML' }, // Telegram options
+  },
+});
+```
+
+Resolution order per channel: `nativeByChannel[channel]` → `native` → none. A
+channel with no override keeps the shared bag, so the common case stays a
+single object.
+
+### Provider options
+
+`providers.push.options` / `providers.messaging.options` are the provider's own
+NotifyKit config, forwarded verbatim — nothing is filtered:
+
+| Channel     | Providers                          | Typical `options`                                                              |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `push`      | `fcm`, `apns`, `webpush`, `huawei` | FCM `credential`, APNs `token`/`keyId`/`teamId`, web-push `subject`/VAPID keys |
+| `messaging` | `telegram`, `slack`                | `botToken`, Slack `botToken`/`channel`                                         |
+
+Custom NotifyKit drivers registered by the application are accepted for either
+channel when they declare a `target` key (the recipient field their string `to`
+is delivered as).
 
 ## Testing
 

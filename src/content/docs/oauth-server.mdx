@@ -1,0 +1,175 @@
+---
+title: 'OAuth server'
+description: 'Authorization code with PKCE, client credentials, refresh tokens, introspection and revocation.'
+---
+
+`@framework/oauth-server` turns an application into an authorization server:
+authorization code with PKCE, client credentials, refresh tokens, token
+introspection, revocation and the RFC 8414 metadata document.
+
+It is **off by default** and never mounted implicitly — an authorization server
+is an attack surface, and the framework's rule is that nothing security-relevant
+is public until you say so.
+
+## What it is not
+
+- Not a social login client. That is `@framework/socialite` (contracts today).
+- Not a replacement for `@framework/auth`. It issues tokens for _other_
+  applications; `auth` authenticates _your_ users. The two share the same
+  `users` table and the same JWT guard on the resource side.
+
+## Configuration
+
+```ts
+// config/index.ts
+import { oauthServerConfigSchema } from '@framework/oauth-server';
+
+export const configSchema = z.object({
+  // …
+  oauth: oauthServerConfigSchema, // defaults to disabled
+});
+```
+
+| Key                      | Default                 | Meaning                                                |
+| ------------------------ | ----------------------- | ------------------------------------------------------ |
+| `enabled`                | `false`                 | Mount the routes and issue tokens at all               |
+| `issuer`                 | `http://localhost:3000` | Token `iss` and the base URL of the metadata document  |
+| `audience`               | `api`                   | Token `aud`; set `auth.jwt.audience` to the same value |
+| `accessTokenTtlSeconds`  | `3600`                  | Access-token lifetime                                  |
+| `refreshTokenTtlSeconds` | `2592000`               | Refresh-token lifetime (30 days)                       |
+| `authCodeTtlSeconds`     | `60`                    | Authorization-code lifetime                            |
+| `defaultScopes`          | `[]`                    | Scopes granted when a client requests none             |
+
+`issuer` must be the public base URL of the application: the metadata document
+and the consent redirect are built from it, so a mismatch sends clients to the
+wrong host.
+
+## Wiring
+
+```ts
+import { createOAuthServerProvider, defineOAuthRoutes, OAUTH_ROUTES_PREFIX } from '@framework/oauth-server';
+import { AUTHORIZATION_SERVER, SCOPE_REGISTRY, TOKEN_ISSUER } from '@framework/oauth-server';
+
+// providers
+providers.push(
+  createOAuthServerProvider<AppConfig>({
+    scopes: [{ name: 'products.read', description: 'Read products' }],
+    // tokenIssuer: await JwtTokenIssuer.create({ issuer, audience }), // pin the keys
+  }),
+);
+
+// routes (only when enabled)
+if (config.oauth.enabled) {
+  const deps = {
+    server: container.resolve(AUTHORIZATION_SERVER),
+    config: config.oauth,
+    scopes: container.resolve(SCOPE_REGISTRY),
+    grants: defaultOAuthGrants,
+  };
+  app.route(OAUTH_ROUTES_PREFIX, defineOAuthRoutes(deps));
+}
+```
+
+The provider registers the Postgres-backed stores (`oauth_clients`,
+`oauth_auth_codes`, `oauth_consents`, `oauth_access_tokens`,
+`oauth_refresh_tokens`), the scope registry and the token issuer. Generate the
+tables with `make:migration` or copy the schema exports
+(`oauthClients`, `oauthAuthCodes`, …) into `database/schema`.
+
+The default issuer is an **ephemeral** JWKS generated at boot: fine for
+development and tests, wrong for production (every restart invalidates tokens
+and rotates the key set). Pin it with `JwtTokenIssuer.create({ issuer, audience })`
+and persist the key material, or use `OpaqueTokenIssuer` with introspection.
+
+## Endpoints
+
+| Method | Path                                      | Purpose                                                          |
+| ------ | ----------------------------------------- | ---------------------------------------------------------------- |
+| `GET`  | `/.well-known/oauth-authorization-server` | RFC 8414 metadata (endpoints, grants, scopes)                    |
+| `GET`  | `/oauth/authorize`                        | Validates the request, then redirects (code/error) or to consent |
+| `POST` | `/oauth/consent`                          | Records the user's decision; answers `{ redirectTo }`            |
+| `POST` | `/oauth/token`                            | `authorization_code`, `client_credentials`, `refresh_token`      |
+| `POST` | `/oauth/introspect`                       | RFC 7662 introspection                                           |
+| `POST` | `/oauth/revoke`                           | RFC 7009 revocation                                              |
+
+`/oauth/authorize` and `/oauth/consent` require an authenticated principal —
+mount them behind the session guard. `/oauth/introspect` and `/oauth/revoke` are
+for confidential clients; mount them behind your own authentication middleware
+when the server is public. Token responses are sent with `cache-control: no-store`.
+
+The consent screen itself is yours: `GET /authorize` redirects to
+`CONSENT_PAGE_PATH` with the pending request, and the page posts back to
+`/oauth/consent` (which returns `{ redirectTo }` so the browser never posts a
+cross-origin form).
+
+## Registering a client
+
+```ts
+import { OAUTH_CLIENT_STORE } from '@framework/oauth-server';
+
+const store = container.resolve(OAUTH_CLIENT_STORE);
+const { client, secret } = await store.register({
+  name: 'Reporting dashboard',
+  type: 'confidential', // 'public' requires PKCE
+  redirectUris: ['https://dashboard.example.com/oauth/callback'],
+  allowedGrants: ['authorization_code', 'refresh_token'],
+  allowedScopes: ['products.read'],
+});
+```
+
+`secret` is returned **once**, already hashed at rest; verification is
+constant-time. Redirect URIs match exactly — no wildcards, no prefix matching.
+
+## Grants
+
+| Grant                | Client type            | Notes                                                                        |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `authorization_code` | public or confidential | PKCE `S256` required for public clients; `code_verifier` checked at `/token` |
+| `client_credentials` | confidential           | No user context; scopes narrowed to the client's allowed set                 |
+| `refresh_token`      | confidential           | Rotates on use; the old token is revoked                                     |
+
+Requested scopes are always narrowed: `resolveGrantedScopes` intersects the
+request with the client registration and the scope registry, so a client cannot
+escalate by asking for more. Unknown scopes are rejected with
+`invalid_scope` rather than silently dropped.
+
+## Verifying tokens on the resource side
+
+Tokens are JWTs by default, signed over a JWKS. The resource side reuses the
+`@framework/auth` JWT guard, which needs key material — either inline (same
+process, no HTTP hop) or remote (`auth.jwt.jwksUri`, rotation-aware):
+
+```ts
+// Same application: hand the issuer's public keys straight to the guard.
+const issuer = container.resolve(TOKEN_ISSUER) as JwtTokenIssuer;
+createAuthProvider({ jwt: { jwks: await issuer.jwks() } });
+```
+
+```ts
+// Separate services: publish the key set yourself and point the API at it.
+auth: { guards: ['jwt'], jwt: { issuer, audience, jwksUri: 'https://auth.example.com/.well-known/jwks.json' } }
+```
+
+The package does not ship a JWKS route: the key set is a deployment concern, and
+serving it is a three-line handler over `issuer.jwks()` if you need one.
+
+The guard validates signature, `iss`, `aud`, expiry and `kid` (with remote JWKS
+rotation), then maps `sub` onto the local `users` row. Abilities come from the
+`scope` claim, so `requireAbility('products.read')` works for OAuth clients and
+API tokens alike.
+
+## Security notes
+
+- Disabled by default; mounting is an explicit decision in `routes/api.ts`.
+- Public clients must use PKCE; the server rejects `plain`.
+- Authorization codes are single-use, hashed at rest and expire in 60 seconds.
+- Consent is stored per (client, user) so a second authorization can skip the
+  screen; revocation deletes the consent.
+- Introspection and revocation must not be publicly reachable without client
+  authentication.
+
+## Related
+
+- [Authentication](/authentication/) — sessions, API tokens, TOTP, JWT guards
+- [Errors and error codes](/errors/) — how OAuth errors are surfaced
+- [Deployment](/deployment/) — key material and the `issuer` URL in production

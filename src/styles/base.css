@@ -1,0 +1,454 @@
+/*
+ * Base layer — application chrome (header, sidebar, table of contents,
+ * pagination, footer) and global interaction states.
+ *
+ * Rules are scoped to Starlight's stable class names (header, sidebar,
+ * right-sidebar, content-panel, sl-markdown-content) so an upgrade to the
+ * theme surfaces breakage here rather than silently changing the design.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+body {
+  font-family: var(--fw-body);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text);
+  background-color: var(--bg);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* A hairline grid + ember wash behind everything, so the page has atmosphere
+ * instead of a flat fill. Fixed, non-interactive, and cheap to paint. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px), var(--glow);
+  background-size:
+    96px 96px,
+    96px 96px,
+    100% 100%;
+  mask-image: linear-gradient(to bottom, black, transparent 55%);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+:where(a) {
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+
+/* One consistent focus ring for every interactive element. */
+:where(a, button, summary, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+ * Header
+ * ----------------------------------------------------------------------- */
+.header {
+  background: var(--sl-color-bg-nav) !important;
+  backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.header > div {
+  gap: var(--space-3);
+}
+
+/* Search: Starlight renders a fake input button; make it read as a real field. */
+header .search-container button,
+header button[data-open-modal] {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  transition:
+    border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+header .search-container button:hover,
+header button[data-open-modal]:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+
+header kbd {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  color: var(--text-dim);
+  background: var(--bg);
+}
+
+.right-group {
+  gap: var(--space-2);
+}
+
+/* Theme + language selects: quiet, monospace, bordered pills. */
+starlight-theme-select label,
+starlight-lang-select label,
+.right-group select {
+  font-family: var(--fw-body);
+  font-size: 0.75rem;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+}
+
+/* Keep Starlight's inline padding: it reserves space for the leading icon.
+ * Overriding it clips the label ("glish"). */
+.right-group select {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-raised);
+  padding-block: 0.25rem;
+  /* Room for the native chevron so the label is never ellipsised. */
+  padding-inline-end: 1.5rem;
+}
+
+.social-icons a {
+  color: var(--text-muted);
+  transition: color var(--dur) var(--ease);
+}
+
+.social-icons a:hover {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * Sidebar
+ * ----------------------------------------------------------------------- */
+.sidebar {
+  border-inline-end: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.sidebar-content {
+  padding-block: var(--space-5) var(--space-6);
+  font-size: 0.875rem;
+}
+
+.sidebar-content ul {
+  gap: 1px;
+}
+
+/* Group headings ("Guides", "Reference") read as mono eyebrows, not links. */
+.sidebar-content summary .group-label,
+.sidebar-content .group-label {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.sidebar-content summary {
+  padding-block: var(--space-3) var(--space-1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+.sidebar-content summary:hover .group-label {
+  color: var(--text);
+}
+
+/* Starlight's caret is an SVG mask; restyle it as a drawn chevron so it
+ * follows the theme instead of inheriting the accent as a solid block. */
+.sidebar-content summary .caret {
+  display: none;
+}
+
+.sidebar-content summary::after {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-inline-start: auto;
+  border-inline-end: 1.5px solid var(--text-dim);
+  border-block-end: 1.5px solid var(--text-dim);
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition:
+    transform var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.sidebar-content details[open] > summary::after {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+
+.sidebar-content summary:hover::after {
+  border-color: var(--text);
+}
+
+/* Top-level links that are not inside a group get the same eyebrow treatment
+ * only for the very first item ("Introduction"); the rest are entries. */
+.sidebar-content a {
+  display: block;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  line-height: 1.45;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.sidebar-content a:hover {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+.sidebar-content a[aria-current='page'] {
+  color: var(--text);
+  font-weight: 500;
+  background: var(--accent-bg);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sidebar-content a[aria-current='page']:hover {
+  background: var(--accent-bg);
+}
+
+/* The nav's first block ("Introduction") is a single link: give it presence. */
+.sidebar-content > ul.top-level > li > a.large {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-block: var(--space-1);
+}
+
+.sidebar-content > ul.top-level > li > a.large:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * Table of contents
+ * ----------------------------------------------------------------------- */
+.right-sidebar {
+  border-inline-start: 1px solid var(--border);
+}
+
+.right-sidebar-panel .sl-container > h2,
+.right-sidebar-panel h2 {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.right-sidebar a {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-inline-start: 2px solid transparent;
+  padding-inline-start: 0.65rem;
+  transition:
+    color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.right-sidebar a:hover {
+  color: var(--text);
+}
+
+.right-sidebar a[aria-current='true'] {
+  color: var(--accent);
+  border-inline-start-color: var(--accent);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+ * Content shell
+ * ----------------------------------------------------------------------- */
+main {
+  padding-block-end: var(--space-7);
+}
+
+.content-panel + .content-panel {
+  border-top: 1px solid var(--border);
+}
+
+/* Starlight renders the page title in its own panel; give it display weight. */
+.content-panel h1 {
+  font-family: var(--fw-display);
+  font-size: var(--text-h1);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: var(--leading-tight);
+  font-variation-settings:
+    'SOFT' 0,
+    'WONK' 0,
+    'opsz' 96;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+/* --------------------------------------------------------------------------
+ * Pagination + footer
+ * ----------------------------------------------------------------------- */
+.pagination-links {
+  gap: var(--space-3);
+  margin-block-start: var(--space-6);
+}
+
+.pagination-links a {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: var(--space-3) var(--space-4);
+  text-decoration: none;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.pagination-links a:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  transform: translateY(-1px);
+}
+
+.pagination-links .link-title {
+  font-weight: 500;
+  color: var(--text);
+}
+
+footer .meta {
+  border-top: 1px solid var(--border);
+  padding-block-start: var(--space-4);
+  margin-block-start: var(--space-6);
+  font-size: var(--text-small);
+  color: var(--text-dim);
+}
+
+footer .meta a {
+  color: var(--text-muted);
+}
+
+footer .meta a:hover {
+  color: var(--accent);
+}
+
+/* --------------------------------------------------------------------------
+ * Skip link (keyboard users land here first)
+ * ----------------------------------------------------------------------- */
+.sl-skip-link {
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+}
+
+/* --------------------------------------------------------------------------
+ * Mobile navigation
+ * ----------------------------------------------------------------------- */
+.sl-menu-button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.sl-menu-button:hover {
+  border-color: var(--border-strong);
+}
+
+#starlight__sidebar {
+  background: var(--bg);
+}
+
+/* --------------------------------------------------------------------------
+ * Motion: one orchestrated entrance, nothing scattered.
+ * ----------------------------------------------------------------------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .content-panel .sl-container,
+  .right-sidebar-panel {
+    animation: rise 320ms var(--ease) both;
+  }
+
+  .content-panel + .content-panel .sl-container {
+    animation-delay: 60ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * Print: drop chrome, keep content legible on paper.
+ * ----------------------------------------------------------------------- */
+@media print {
+  body::before {
+    display: none;
+  }
+
+  .content-panel h1,
+  .sl-markdown-content h2,
+  .sl-markdown-content h3 {
+    color: #000;
+  }
+
+  .sl-markdown-content a {
+    color: #000;
+    text-decoration: underline;
+  }
+
+  .sl-markdown-content pre {
+    border: 1px solid #bbb;
+  }
+}

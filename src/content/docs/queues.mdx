@@ -1,9 +1,7 @@
 ---
-title: Queues
+title: 'Queues'
 description: 'Versioned jobs, retries, timeouts, batches and workers over BullMQ and Redis.'
 ---
-
-# Queues
 
 Heavy work belongs off the request path. The `@framework/queue` package gives
 you durable background jobs on BullMQ and Redis: payloads are zod-validated
@@ -88,8 +86,47 @@ ever reaches Redis. Options override the definition per dispatch:
 await queue.dispatch(resizeImage, { imageId }, ctx, {
   delayMs: 60_000, // run in one minute
   attempts: 5, // override the definition's try count
+  priority: 1, // lower runs first (BullMQ priority)
+  native: { failParentOnFailure: true, stackTraceLimit: 10 }, // raw JobsOptions
 });
 ```
+
+`native` is the escape hatch for any BullMQ `JobsOptions` the framework does
+not model (`failParentOnFailure`, `stackTraceLimit`, `removeOnComplete`,
+`backoff`, …). It is merged last, so it wins over both the definition and the
+queue defaults.
+
+### Queue options
+
+`QueueManager` forwards its configuration to BullMQ, so the connection and the
+queue itself are configurable without patching the package:
+
+```ts
+const queue = new QueueManager({
+  url: config.redis.url,
+  prefix: config.queue.prefix,
+  queue: config.queue.name,
+  // Connection extras merged over the parsed URL (auth, database, TLS)
+  connection: { db: 2, tls: { servername: 'redis.example.com' } },
+  // Applied to every dispatch unless the definition or the call overrides it
+  defaultJobOptions: { stackTraceLimit: 5 },
+  // Rate limit: at most 50 jobs per second
+  limiter: { max: 50, duration: 1_000 },
+  // Any other BullMQ Queue option, forwarded verbatim
+  native: { skipVersionCheck: true },
+});
+```
+
+| Option                        | Effect                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `connection`                  | BullMQ connection fields merged over `url` (`db`, `username`, `password`, `tls`, `enableReadyCheck`, `connectTimeout`, …) |
+| `defaultJobOptions`           | BullMQ job options applied to every dispatch; per-dispatch `native` wins                                                  |
+| `limiter`                     | BullMQ rate limiter (`{ max, duration }`)                                                                                 |
+| `native`                      | Raw BullMQ `QueueOptions`; `connection`/`prefix` stay framework-owned                                                     |
+| `keepCompleted`, `keepFailed` | Retention counts (defaults 1 000 / 5 000)                                                                                 |
+
+`queue.queue` is the underlying BullMQ `Queue`, available for SDK operations
+the framework does not wrap (`getJob`, `getFailed`, `clean`, `obliterate`, …).
 
 Inspect a job by id — state, progress, attempts, result and failure reason:
 

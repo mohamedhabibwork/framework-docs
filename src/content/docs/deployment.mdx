@@ -1,26 +1,27 @@
 ---
-title: Deployment
-description: 'Processes, configuration, migrations as a release step and scaling notes.'
+title: 'Deployment'
+description: 'Processes, configuration, migrations as a release step, health checks and scaling.'
 ---
-
-# Deployment
 
 Processes, configuration, migrations and operational behavior for running a
 generated application.
 
 ## Processes
 
-| Process      | Command                                           | Purpose                                              |
-| ------------ | ------------------------------------------------- | ---------------------------------------------------- |
-| HTTP server  | `bun run start` (or `bun run cli -- serve`)       | Serves the API, health, audit and realtime endpoints |
-| Queue worker | `bun run worker` (or `bun run cli -- queue:work`) | Consumes BullMQ jobs; run separately from HTTP       |
-| Migrations   | `bun run cli -- db:migrate`                       | Release step — never automatic on startup            |
-| CLI          | `bun run cli -- <command>`                        | Generators, inspections, maintenance                 |
+| Process      | Command                                           | Purpose                                                                                                                           |
+| ------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP server  | `bun run start` (or `bun run cli -- serve`)       | Serves the API, health, audit and realtime endpoints                                                                              |
+| Queue worker | `bun run worker` (or `bun run cli -- queue:work`) | Consumes BullMQ jobs **and** workflow unit/advance jobs; run separately from HTTP                                                 |
+| Scheduler    | `bun run cli -- schedule:work`                    | Syncs cron timetables and consumes schedule fires from the dedicated `<queue>-schedules` queue, dispatching mapped jobs/workflows |
+| Migrations   | `bun run cli -- db:migrate`                       | Release step — never automatic on startup                                                                                         |
+| CLI          | `bun run cli -- <command>`                        | Generators, inspections, maintenance                                                                                              |
 
 Development uses `bun run dev` (hot reload). Each process handles
 SIGTERM/SIGINT with a bounded graceful drain (`SHUTDOWN_TIMEOUT_MS`): the
 server stops accepting connections and the worker finishes in-flight jobs
-before exiting.
+before exiting. Workers scale horizontally for both jobs and workflows
+(queued workflow actions are ordinary BullMQ jobs; run state is in Postgres,
+so any worker can pick up any node).
 
 ## Configuration
 

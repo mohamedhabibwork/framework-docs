@@ -6,5 +6,5 @@
   "singleQuote": true,
   "semi": true,
   "trailingComma": "all",
-  "ignorePatterns": ["dist", "coverage", "node_modules", ".tmp", "apps/docs", "template", "**/database/migrations/meta"]
+  "ignorePatterns": ["dist", "coverage", "node_modules", ".tmp"]
 }

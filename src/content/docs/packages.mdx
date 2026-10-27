@@ -1,0 +1,101 @@
+---
+title: 'Packages'
+description: 'What each package does, its delivery status and how the packages depend on each other.'
+---
+
+The framework is 25 packages, one per concern. Each is published as its own
+repository (subtree-split from this monorepo), so an application can depend on
+exactly the pieces it uses — and the framework can be adopted incrementally.
+
+Inside the monorepo they resolve through the workspace:
+
+```json
+{ "dependencies": { "@framework/core": "workspace:*" } }
+```
+
+In a standalone application, the generated `package.json` points at the split
+repositories:
+
+```json
+{ "dependencies": { "@framework/core": "github:mohamedhabibwork/framework-core" } }
+```
+
+| Package                    | What it does                                                                                             | Status         | Guide                    |
+| -------------------------- | -------------------------------------------------------------------------------------------------------- | -------------- | ------------------------ |
+| `@framework/core`          | IoC container, service providers, validated config, lifecycle and execution context.                     | Validated      | —                        |
+| `@framework/http`          | Hono kernel: error envelope, request scope, middleware registry, policies, throttling.                   | Validated      | [Read](/platform/)       |
+| `@framework/validation`    | Zod request validation and form requests with authorization hooks.                                       | Validated      | [Read](/modules/)        |
+| `@framework/database`      | PostgreSQL connection, transactions, Drizzle CRUD mixins, audit trail, migrations.                       | Validated      | [Read](/platform/)       |
+| `@framework/crud`          | Generic resource service/controller, audit endpoints, queued CSV/JSON import-export.                     | Validated      | [Read](/modules/)        |
+| `@framework/auth`          | Sessions, API tokens, password hashing, email verification, TOTP, JWT guards.                            | Validated      | [Read](/authentication/) |
+| `@framework/events`        | Typed event bus (in-memory or Redis pub/sub) and a WebSocket realtime hub.                               | Validated      | [Read](/platform/)       |
+| `@framework/queue`         | BullMQ jobs: validated payloads, idempotency, priority, queue options, batches, drain.                   | Validated      | [Read](/queues/)         |
+| `@framework/scheduler`     | Cron registry with distributed overlap locking that dispatches jobs or workflows.                        | Validated      | [Read](/scheduling/)     |
+| `@framework/workflow`      | Durable multi-stage workflows with retries, saga compensation and wait-for-event.                        | Validated      | [Read](/workflows/)      |
+| `@framework/cache`         | Memory/Redis cache with tags, stale-while-revalidate, batches, locks and rate limiting.                  | Validated      | [Read](/cache/)          |
+| `@framework/storage`       | Disk abstraction over local and cloud storage with per-operation options and path guards.                | Validated      | [Read](/storage/)        |
+| `@framework/mail`          | Typed mailable builder, transport contract, console and in-memory test transports.                       | Validated      | [Read](/mail/)           |
+| `@framework/notifications` | Multi-channel notifications with per-provider options, per-channel native overrides and queued delivery. | Validated      | [Read](/notifications/)  |
+| `@framework/logging`       | Structured, context-enriched logs with redaction and swappable sinks.                                    | Validated      | [Read](/logging/)        |
+| `@framework/search`        | Full-text search with memory and PostgreSQL drivers, plus queue-backed indexing.                         | Validated      | [Read](/search/)         |
+| `@framework/oauth-server`  | OAuth 2.0 / OIDC authorization server: authorization code + PKCE, introspection, revocation.             | Validated      | [Read](/oauth-server/)   |
+| `@framework/openapi`       | OpenAPI 3.1 generation from route metadata and a route/operation drift check.                            | Validated      | [Read](/platform/)       |
+| `@framework/testing`       | Isolated per-run PostgreSQL databases, transaction sandboxes and HTTP test helpers.                      | Validated      | [Read](/testing/)        |
+| `@framework/support`       | Laravel-style helpers: config, env, abort, logger, retry and context accessors.                          | Validated      | [Read](/helpers/)        |
+| `@framework/cli`           | Command runtime, registry and the generators behind `create` and `make:*`.                               | Validated      | [Read](/cli-reference/)  |
+| `@framework/prompts`       | Terminal prompts, spinners, tables and structured output used by the CLI.                                | Validated      | —                        |
+| `@framework/ai-mcp`        | stdio MCP server exposing the CLI as tools and the repository docs as resources.                         | Implemented    | [Read](/ai/)             |
+| `@framework/observatory`   | Contracts for in-app request/query/job/event inspection (Telescope equivalent).                          | Contracts only | —                        |
+| `@framework/socialite`     | Contracts for OAuth2 social login providers reusing the framework identity model.                        | Contracts only | —                        |
+
+## Status legend
+
+| Status          | Meaning                                                                  |
+| --------------- | ------------------------------------------------------------------------ |
+| **Validated**   | Covered by automated tests that run in `bun run test`                    |
+| **Implemented** | Works and is exercised, but has no dedicated suite                       |
+| **Contracts**   | Published types and DI tokens only — no runtime yet; do not depend on it |
+
+The same classification, with the evidence for each row, is in
+[Implementation status](/status/). A dash in the **Guide** column means the
+package has no dedicated page yet — its README is the only reference.
+
+## Dependencies between packages
+
+```text
+core ─┬─ support ── (helpers used everywhere)
+      ├─ http ── validation ── crud ── cli
+      ├─ database ─┬─ auth ── oauth-server
+      │            └─ search
+      ├─ events ── queue ── scheduler ── workflow
+      └─ logging / cache / storage / mail / notifications
+```
+
+- `core` has no framework dependencies; it owns the container, config and
+  lifecycle.
+- `cli` depends on the packages it generates code _for_ only to render
+  templates — generated applications refuse to scaffold an artifact whose
+  package they do not depend on.
+- `ai-mcp` bridges the CLI in-process; it is a tool, not a runtime dependency.
+
+## Adding or removing a package
+
+Packages are discovered from `packages/*` by the workspace globs. To add one:
+
+1. `packages/<name>/package.json` with `"name": "@framework/<name>"`, `type: module`,
+   `exports: { ".": "./src/index.ts" }`.
+2. `src/index.ts` re-exporting the public API, `src/types.ts` for interfaces,
+   `src/constants.ts` for DI tokens, `src/provider.ts` for `create<Name>Provider`.
+3. `tests/` with a suite that runs against real infrastructure where relevant.
+4. A row in this catalog and in [Implementation status](/status/), plus a guide
+   page when the package has a user-facing surface.
+
+Removing a package means deleting its directory, its row here, and its
+`.gitmodules` entry — the sync script (`bun run sync:repos`) derives repositories
+from that file.
+
+## Related
+
+- [Implementation status](/status/) — delivery evidence per package and command
+- [CLI reference](/cli-reference/) — generators that scaffold against packages
+- [Deployment](/deployment/) — how split repositories are released

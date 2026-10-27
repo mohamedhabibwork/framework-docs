@@ -1,0 +1,124 @@
+---
+title: 'Errors & codes'
+description: 'The error envelope, the stable code catalog, validation details and client handling.'
+---
+
+Every failure leaves the HTTP kernel as the same envelope, with a stable
+machine-readable `code` and a human-readable `message`. Clients switch on
+`code`; the message text is documentation, not an API.
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "The given data was invalid",
+    "fields": [{ "path": "price", "message": "Expected number, received string", "code": "invalid_type" }],
+    "requestId": "01J8Z9K3Q7YV2M4T6R8S0W1X2Y"
+  }
+}
+```
+
+`fields` is present on `422` only, `requestId` whenever the request entered the
+kernel (it is also the correlation id in logs). The envelope is produced by the
+kernel's `onError` handler — handlers throw, they never build error responses.
+
+## The catalog
+
+Codes live in `@framework/core` (`ERROR_CATALOG`) so the HTTP kernel, the
+OpenAPI generator and client SDKs share one list. An unknown code cannot be
+constructed at runtime.
+
+| Code                        | Status | Returned when                                                             |
+| --------------------------- | ------ | ------------------------------------------------------------------------- |
+| `BAD_REQUEST`               | 400    | The request is malformed (bad query, missing parameter)                   |
+| `MALFORMED_JSON`            | 400    | The body is not valid JSON                                                |
+| `UNAUTHENTICATED`           | 401    | No credential, or an expired/invalid one                                  |
+| `FORBIDDEN`                 | 403    | Authenticated but not allowed (policy or ability)                         |
+| `NOT_FOUND`                 | 404    | The addressed resource does not exist (also used for cross-owner reads)   |
+| `ROUTE_NOT_FOUND`           | 404    | No route matches the method + path                                        |
+| `METHOD_NOT_ALLOWED`        | 405    | The path exists, the method does not                                      |
+| `CONFLICT`                  | 409    | The write conflicts with current state                                    |
+| `UNIQUE_VIOLATION`          | 409    | A unique constraint rejected the write                                    |
+| `FOREIGN_KEY_VIOLATION`     | 409    | A referenced row is missing, or is still referenced                       |
+| `PAYLOAD_TOO_LARGE`         | 413    | The body exceeds the configured limit                                     |
+| `UNSUPPORTED_MEDIA_TYPE`    | 415    | The `content-type` is not accepted                                        |
+| `VALIDATION_FAILED`         | 422    | A schema rejected the input; `fields` carries the details                 |
+| `TOO_MANY_REQUESTS`         | 429    | A limiter rejected the request; `Retry-After` is set                      |
+| `INTERNAL_ERROR`            | 500    | An unhandled failure (message replaced by the catalog text in production) |
+| `CAPABILITY_UNSUPPORTED`    | 501    | The backend honestly cannot do what was asked                             |
+| `SERVICE_UNAVAILABLE`       | 503    | A dependency (database, Redis) is unreachable                             |
+| `SEARCH_ENGINE_UNAVAILABLE` | 503    | The search driver is unreachable                                          |
+
+Database errors are translated, not leaked: a Postgres `23505` becomes
+`UNIQUE_VIOLATION`, `23503` becomes `FOREIGN_KEY_VIOLATION`, and the SQL text
+never reaches the response.
+
+## Validation failures
+
+`validate()` and form requests render Zod issues as `fields`, one entry per
+path, using the schema's field path (`price`, `items.0.sku`):
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "The given data was invalid",
+    "fields": [
+      { "path": "name", "message": "String must contain at least 1 character(s)", "code": "too_small" },
+      { "path": "price", "message": "Required", "code": "invalid_type" }
+    ]
+  }
+}
+```
+
+Authorization runs before validation: a request that fails both a policy and a
+schema returns `403`, never `422`, so a caller cannot probe the schema of a
+resource they cannot touch.
+
+## Throwing errors
+
+Application code throws; the kernel renders.
+
+```ts
+import { abort, abort_if, abort_unless } from '@framework/support';
+
+abort(404); // catalog message
+abort('CONFLICT', 'A product with this SKU already exists');
+abort_if(product.archived, 409, 'Archived products cannot be edited');
+abort_unless(actor.can('products.update'), 403);
+```
+
+Use the status form when the exact code does not matter (the first catalog code
+for that status is used) and the code form when clients branch on it. For a
+typed failure inside a service, throw `httpError('FORBIDDEN', 'message')` — the
+same envelope, no HTTP import in the domain layer.
+
+In production (`exposeInternalErrors: false`, the default for generated apps),
+`5xx` messages are replaced by the catalog text and the original error is sent
+to the `report` hook — stack traces and SQL never reach the client. Development
+keeps the real message.
+
+## Client handling
+
+- **Branch on `code`.** `NOT_FOUND` and `ROUTE_NOT_FOUND` are both `404` but
+  mean different things (missing row vs missing route).
+- **Show `fields` next to inputs** on `422`; `path` is a dotted path into the
+  request body.
+- **Honour `Retry-After`** on `429` and `503` — the throttle middleware and the
+  readiness probe both set it.
+- **Log `requestId`**; it joins the client report to the server log line and to
+  `audit_logs.correlation_id`.
+
+## OpenAPI
+
+Every declared error status gets an `ErrorEnvelope<status>` component whose
+`code` is a literal union of the catalog codes valid for that status; `422`
+additionally carries the `fields` schema. That means generated clients get
+exhaustive `switch` statements for free, and `openapi:check` fails the build if
+a route declares a status the catalog cannot produce.
+
+## Related
+
+- [Platform guide](/platform/) — middleware order, throttling, request scope
+- [Authoring modules](/modules/) — validation and form requests
+- [CLI reference](/cli-reference/) — `openapi:generate`, `openapi:check`
