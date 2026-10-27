@@ -15,36 +15,36 @@
 type SidebarItem = { label: string; link: string } | { label: string; slug: string };
 
 const guides: SidebarItem[] = [
-	{ label: 'Cache', slug: 'cache' },
-	{ label: 'Storage', slug: 'storage' },
-	{ label: 'Mail', slug: 'mail' },
-	{ label: 'Notifications', slug: 'notifications' },
-	{ label: 'Authentication', slug: 'authentication' },
-	{ label: 'Logging', slug: 'logging' },
-	{ label: 'Queues', slug: 'queues' },
-	{ label: 'Workflows', slug: 'workflows' },
-	{ label: 'Scheduling', slug: 'scheduling' },
+  { label: 'Cache', slug: 'cache' },
+  { label: 'Storage', slug: 'storage' },
+  { label: 'Mail', slug: 'mail' },
+  { label: 'Notifications', slug: 'notifications' },
+  { label: 'Authentication', slug: 'authentication' },
+  { label: 'Logging', slug: 'logging' },
+  { label: 'Queues', slug: 'queues' },
+  { label: 'Workflows', slug: 'workflows' },
+  { label: 'Scheduling', slug: 'scheduling' },
 ];
 
 const reference: SidebarItem[] = [
-	{ label: 'Versions', slug: 'versions' },
-	{ label: 'Releases', slug: 'releases' },
-	{ label: 'Implementation status', slug: 'status' },
-	{ label: 'Architecture decisions', slug: 'decisions' },
+  { label: 'Versions', slug: 'versions' },
+  { label: 'Releases', slug: 'releases' },
+  { label: 'Implementation status', slug: 'status' },
+  { label: 'Architecture decisions', slug: 'decisions' },
 ];
 
 /** The full sidebar for a docs line (latest or archived snapshot). */
 export function sidebarFor(_line: string): SidebarItem[] {
-	return [
-		{ label: 'Introduction', link: '/' },
-		{ label: 'Getting started', slug: 'getting-started' },
-		{ label: 'Guides', items: guides },
-		{ label: 'Helpers', slug: 'helpers' },
-		{ label: 'CLI reference', slug: 'cli-reference' },
-		{ label: 'Authoring modules', slug: 'modules' },
-		{ label: 'Platform guide', slug: 'platform' },
-		{ label: 'Testing', slug: 'testing' },
-		{ label: 'Deployment', slug: 'deployment' },
-		{ label: 'Reference', items: reference },
-	];
+  return [
+    { label: 'Introduction', link: '/' },
+    { label: 'Getting started', slug: 'getting-started' },
+    { label: 'Guides', items: guides },
+    { label: 'Helpers', slug: 'helpers' },
+    { label: 'CLI reference', slug: 'cli-reference' },
+    { label: 'Authoring modules', slug: 'modules' },
+    { label: 'Platform guide', slug: 'platform' },
+    { label: 'Testing', slug: 'testing' },
+    { label: 'Deployment', slug: 'deployment' },
+    { label: 'Reference', items: reference },
+  ];
 }

@@ -209,7 +209,12 @@ what the service persisted and recorded:
 ```ts
 const store = new InMemoryNotificationStore();
 // …bind NOTIFICATION_STORE, then:
-await notifications.send({ name: 'user.welcome', channels: ['email', 'database'], to: 'ada@example.com', payload: { userName: 'Ada' } });
+await notifications.send({
+  name: 'user.welcome',
+  channels: ['email', 'database'],
+  to: 'ada@example.com',
+  payload: { userName: 'Ada' },
+});
 
 store.records(); // every stored record, oldest first
 const status = await notifications.status(id);

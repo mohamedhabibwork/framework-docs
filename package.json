@@ -3,26 +3,30 @@
   "version": "0.0.1",
   "description": "Documentation site for the Hono TypeScript Framework (Starlight + Astro).",
   "homepage": "https://framework.habib.cloud",
+  "bugs": {
+    "url": "https://github.com/mohamedhabibwork/framework/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mohamedhabibwork/framework-docs.git"
   },
-  "bugs": {
-    "url": "https://github.com/mohamedhabibwork/framework/issues"
-  },
-  "dependencies": {
-    "@astrojs/mdx": "^8.0.3",
-    "@astrojs/starlight": "^0.42.7",
-    "astro": "^7.3.7",
-    "sharp": "^0.35.3"
-  },
+  "type": "module",
   "scripts": {
     "postinstall": "bun scripts/ensure-satteri-wasm.mjs",
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
-  "type": "module"
+  "dependencies": {
+    "@astrojs/mdx": "^8.0.3",
+    "@astrojs/starlight": "^0.42.7",
+    "astro": "^7.3.7",
+    "sharp": "^0.35.3"
+  }
 }

@@ -32,13 +32,13 @@ entries never trail.
 Configure through the `logging` section or its environment variables —
 precedence is process env, then env file, then schema defaults:
 
-| Key | Env | Default | Meaning |
-|---|---|---|---|
-| `level` | `LOG_LEVEL` | `info` | Entries below this level are dropped |
-| `name` | `LOG_NAME` | `app` | Service name carried on every entry |
-| `driver` | `LOG_DRIVER` | `console` | Sink: `console`, `file` or `memory` |
-| `filePath` | `LOG_FILE_PATH` | — | Required when `driver: 'file'` |
-| `maxBytes` | `LOG_MAX_BYTES` | — | Rotate the file before a write would exceed this |
+| Key        | Env             | Default   | Meaning                                          |
+| ---------- | --------------- | --------- | ------------------------------------------------ |
+| `level`    | `LOG_LEVEL`     | `info`    | Entries below this level are dropped             |
+| `name`     | `LOG_NAME`      | `app`     | Service name carried on every entry              |
+| `driver`   | `LOG_DRIVER`    | `console` | Sink: `console`, `file` or `memory`              |
+| `filePath` | `LOG_FILE_PATH` | —         | Required when `driver: 'file'`                   |
+| `maxBytes` | `LOG_MAX_BYTES` | —         | Rotate the file before a write would exceed this |
 
 A typical production `.env` uses the file driver:
 
@@ -73,9 +73,9 @@ The `FrameworkLogger` contract is deliberately small:
 logger.debug('cache miss', { key });
 logger.info('job done', { attempts: 2 });
 logger.warn('retrying', { attempt: 3 });
-logger.error('boom', new Error('kaboom'));    // live Error, serialized on the entry
-logger.error('boom', { userId });             // or structured fields
-logger.isLevelEnabled('debug');               // skip costly field building
+logger.error('boom', new Error('kaboom')); // live Error, serialized on the entry
+logger.error('boom', { userId }); // or structured fields
+logger.isLevelEnabled('debug'); // skip costly field building
 ```
 
 Pass an `Error` directly to `error()` — it lands on the entry's `error` field

@@ -39,10 +39,10 @@ import { z } from 'zod/v4';
 
 const charge = defineAction({
   name: 'charge',
-  input: z.object({ orderId: z.string() }),   // the slice of state it consumes
-  attempts: 3,                                // total tries (default 3)
-  backoffMs: 1_000,                           // backoff base (default 1s)
-  timeoutMs: 30_000,                          // per-attempt timeout (default 5 minutes)
+  input: z.object({ orderId: z.string() }), // the slice of state it consumes
+  attempts: 3, // total tries (default 3)
+  backoffMs: 1_000, // backoff base (default 1s)
+  timeoutMs: 30_000, // per-attempt timeout (default 5 minutes)
   async run(input, ctx) {
     await ctx.progress(50);
     return { charged: true, paymentId: await bill(input.orderId) };
@@ -50,7 +50,7 @@ const charge = defineAction({
 });
 
 export const orderFulfillment = defineWorkflow({
-  name: 'order-fulfillment',                  // lowercase, no dots
+  name: 'order-fulfillment', // lowercase, no dots
   version: 1,
   input: z.object({ orderId: z.string() }),
   stages: [reserveStock, defineStage({ name: 'pay', actions: [charge] }), ship],
@@ -69,7 +69,7 @@ application.container.resolve(WORKFLOW_MANAGER).register(orderFulfillment);
 const engine = new WorkflowEngine(application, manager, queue, bus);
 const worker = new JobWorker(queue, application, [...jobs, ...engine.jobs]);
 worker.start();
-engine.start();   // arms the wait bridge and the wait-timeout sweep
+engine.start(); // arms the wait bridge and the wait-timeout sweep
 ```
 
 ## Dispatching and observing
@@ -119,7 +119,7 @@ export const orderFlow = defineWorkflow({
   pipelines: [checkout, fulfillment],
 });
 
-await manager.dispatch(checkout, { orderId }, ctx);   // pipelines are dispatchable on their own
+await manager.dispatch(checkout, { orderId }, ctx); // pipelines are dispatchable on their own
 ```
 
 A stage without `actions` gets a convenience implicit action named
@@ -187,11 +187,11 @@ Handlers receive a context with the run's identity and controls:
 const example = defineAction({
   name: 'example',
   async run(state, ctx) {
-    ctx.runId;            // run id
-    ctx.nodeId;           // this action's node id
-    ctx.attempt;          // 1-based attempt number
-    ctx.signal;           // AbortSignal — aborted when the attempt times out
-    ctx.state;            // the merged run state
+    ctx.runId; // run id
+    ctx.nodeId; // this action's node id
+    ctx.attempt; // 1-based attempt number
+    ctx.signal; // AbortSignal — aborted when the attempt times out
+    ctx.state; // the merged run state
     await ctx.progress(75); // emit a progress event for dashboards
     return null;
   },
@@ -200,13 +200,13 @@ const example = defineAction({
 
 ## Timeouts and retries
 
-| Scope | Default | Notes |
-|---|---|---|
-| Action attempt | 5 minutes | `timeoutMs` per action; aborts via the context signal |
-| Inline retries | 3 attempts | `attempts`/`backoffMs`; sleeps `backoffMs × attempt` between tries |
+| Scope               | Default    | Notes                                                              |
+| ------------------- | ---------- | ------------------------------------------------------------------ |
+| Action attempt      | 5 minutes  | `timeoutMs` per action; aborts via the context signal              |
+| Inline retries      | 3 attempts | `attempts`/`backoffMs`; sleeps `backoffMs × attempt` between tries |
 | Queued action retry | 3 attempts | each try is its own queue job attempt (500 ms exponential backoff) |
-| Wait stage | 24 hours | `waitFor.timeoutMs`; a periodic sweep fails expired waits |
-| Unit job | 30 minutes | the internal `__workflow.unit` job timeout |
+| Wait stage          | 24 hours   | `waitFor.timeoutMs`; a periodic sweep fails expired waits          |
+| Unit job            | 30 minutes | the internal `__workflow.unit` job timeout                         |
 
 A failed inline attempt requeues the node (`running → pending`, error
 recorded); an exhausted queued action fails the node and cascades. The
@@ -251,7 +251,7 @@ const waitPayment = defineStage({
   waitFor: {
     event: 'payment.succeeded',
     timeoutMs: 10 * 60_000,
-    pick: (event) => event.payload,           // stored into run state
+    pick: (event) => event.payload, // stored into run state
   },
 });
 ```
@@ -270,11 +270,11 @@ and errors.
 The manager (and the HTTP admin API below) can steer runs at any time:
 
 ```ts
-await manager.cancel(runId);                  // pending/running/waiting → cancelled
-await manager.retry(runId);                   // re-run a failed run from its failure point
+await manager.cancel(runId); // pending/running/waiting → cancelled
+await manager.retry(runId); // re-run a failed run from its failure point
 await manager.retry(runId, { fromNode: 'order-fulfillment.pay.charge' });
-await manager.resume(runId);                  // force-satisfy a parked wait
-await manager.prune(30);                      // drop terminal runs older than 30 days
+await manager.resume(runId); // force-satisfy a parked wait
+await manager.prune(30); // drop terminal runs older than 30 days
 ```
 
 `retry` resets only the failed node's subtree — completed work outside it is
@@ -290,14 +290,14 @@ import { workflowRoutes } from '@framework/workflow';
 app.route('/workflow', workflowRoutes({ authorize: requireAbility('workflows.manage') }));
 ```
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /workflow` | Paginated runs, filterable by workflow, status, correlation |
-| `GET /workflow/:runId` | One run with its full node tree |
-| `POST /workflow/:runId/retry` | Re-run from the failure point (optional `fromNode`) |
-| `POST /workflow/:runId/cancel` | Cancel a pending/running/waiting run |
-| `POST /workflow/:runId/resume` | Force-satisfy a parked wait |
-| `POST /workflow/dispatch` | Dispatch a registered workflow by name |
+| Endpoint                       | Purpose                                                     |
+| ------------------------------ | ----------------------------------------------------------- |
+| `GET /workflow`                | Paginated runs, filterable by workflow, status, correlation |
+| `GET /workflow/:runId`         | One run with its full node tree                             |
+| `POST /workflow/:runId/retry`  | Re-run from the failure point (optional `fromNode`)         |
+| `POST /workflow/:runId/cancel` | Cancel a pending/running/waiting run                        |
+| `POST /workflow/:runId/resume` | Force-satisfy a parked wait                                 |
+| `POST /workflow/dispatch`      | Dispatch a registered workflow by name                      |
 
 The admin API is unprotected unless you pass `authorize` — back it with
 [Authentication](/authentication/) (`requireAbility`) in any non-local
@@ -330,7 +330,7 @@ publishing directly:
 
 ```ts
 const { runId } = await manager.dispatch(orderFulfillment, { orderId: 'o-1' }, ctx);
-const run = await settle(runId);              // your polling helper
+const run = await settle(runId); // your polling helper
 expect(run.status).toBe('completed');
 
 await bus.publish({ id: crypto.randomUUID(), type: 'payment.succeeded', payload: { paymentId: 'p-9' } /* ... */ });

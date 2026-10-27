@@ -38,8 +38,8 @@ The validated shape is `{ driver: 'console' | 'memory', from }`:
 {
   "mail": {
     "driver": "console",
-    "from": "no-reply@example.com"
-  }
+    "from": "no-reply@example.com",
+  },
 }
 ```
 
@@ -210,8 +210,9 @@ const transport = new MemoryMailTransport();
 const mailer = new Mailer(transport, { from });
 
 transport.failNext(new Error('relay down'));
-await expect(mailer.to('ada@example.com').subject('Hi').text('Hello').send())
-  .rejects.toMatchObject({ code: 'MAIL_TRANSPORT_FAILED' });
+await expect(mailer.to('ada@example.com').subject('Hi').text('Hello').send()).rejects.toMatchObject({
+  code: 'MAIL_TRANSPORT_FAILED',
+});
 expect(transport.sent()).toHaveLength(0); // the failed message never recorded
 ```
 

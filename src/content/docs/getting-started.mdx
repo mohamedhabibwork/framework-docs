@@ -9,10 +9,10 @@ From zero to a running API with real PostgreSQL, auditing, events and queues.
 
 ## Prerequisites
 
-| Tool | Purpose |
-|---|---|
-| [Bun](https://bun.sh) ≥ 1.4 | Runtime, package manager, test runner |
-| Docker (or a PostgreSQL 17 + Redis 7 server) | Local infrastructure via compose |
+| Tool                                         | Purpose                               |
+| -------------------------------------------- | ------------------------------------- |
+| [Bun](https://bun.sh) ≥ 1.4                  | Runtime, package manager, test runner |
+| Docker (or a PostgreSQL 17 + Redis 7 server) | Local infrastructure via compose      |
 
 ## Path A — run the reference application (playground)
 
@@ -81,13 +81,13 @@ tested route. Use `--dry-run` to preview every file change first.
 
 Every generated application ships with:
 
-| Surface | Where | Purpose |
-|---|---|---|
-| `GET /health/live`, `GET /health/ready` | `routes/health.ts` | Liveness (no dependencies) and readiness (database ping) |
-| `GET /audit`, `GET /audit/:id` | `@framework/crud` | Filterable audit trail (actor, resource, correlation id, action) |
-| `GET /ws` | `@framework/events` | WebSocket multiplexer over the event bus |
-| `/api/v1/<module>` CRUD | generated modules | Typed routes, OpenAPI metadata, pagination, validation |
-| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/` | HTTP server, queue worker, application CLI |
+| Surface                                        | Where               | Purpose                                                          |
+| ---------------------------------------------- | ------------------- | ---------------------------------------------------------------- |
+| `GET /health/live`, `GET /health/ready`        | `routes/health.ts`  | Liveness (no dependencies) and readiness (database ping)         |
+| `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action) |
+| `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                         |
+| `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation           |
+| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/`              | HTTP server, queue worker, application CLI                       |
 
 Event channels: `entity.created|updated|deleted|restored`, `import.*`,
 `export.*` — published on the in-process bus by default, or fanned out

@@ -32,7 +32,7 @@ and the `storage.default` disk is additionally bound to `STORAGE`:
 ```ts
 import { STORAGE, storageDiskToken } from '@framework/storage';
 
-const disk = scope.resolve(STORAGE);                          // the default disk
+const disk = scope.resolve(STORAGE); // the default disk
 const publicDisk = scope.resolve(storageDiskToken('public')); // a named disk
 ```
 

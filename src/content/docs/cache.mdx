@@ -28,10 +28,7 @@ import type { AppConfig } from '../../config';
 export const cacheProvider = defineProvider<AppConfig>(
   createCacheProvider<AppConfig>((config: AppConfig) => ({
     driver: config.cache.driver,
-    redis:
-      config.cache.driver === 'redis'
-        ? { url: config.cache.url, prefix: config.cache.prefix }
-        : undefined,
+    redis: config.cache.driver === 'redis' ? { url: config.cache.url, prefix: config.cache.prefix } : undefined,
   })),
 );
 ```
@@ -40,11 +37,11 @@ The provider validates its section (`driver` is `memory` or `redis`; `redis`
 requires both `url` and `prefix`) and registers three singletons, each closed
 with the container at shutdown:
 
-| Token | Contract | Purpose |
-|---|---|---|
-| `CACHE` | `Cache` | get/set/remember, atomic counters |
-| `LOCK_STORE` | `LockStore` | named, expiring locks with owner tokens |
-| `RATE_LIMITER` | `RateLimiter` | fixed-window counting |
+| Token          | Contract      | Purpose                                 |
+| -------------- | ------------- | --------------------------------------- |
+| `CACHE`        | `Cache`       | get/set/remember, atomic counters       |
+| `LOCK_STORE`   | `LockStore`   | named, expiring locks with owner tokens |
+| `RATE_LIMITER` | `RateLimiter` | fixed-window counting                   |
 
 ### Configuration
 
@@ -74,16 +71,16 @@ const cache = scope.resolve(CACHE);
 // Plain values, optional TTL in seconds (omit for no expiry)
 await cache.set('user:1', { id: 'u1', roles: ['admin'] }, 60);
 const user = await cache.get<{ id: string; roles: string[] }>('user:1'); // null on miss
-await cache.has('user:1');    // true
+await cache.has('user:1'); // true
 await cache.delete('user:1'); // true when an unexpired entry was removed
 
 // Read-through memoization: factory runs only on a miss
 const stats = await cache.remember('dashboard:stats', 300, () => computeStats());
 
 // Atomic counters — the TTL applies only when the counter is first created
-await cache.increment('visits');                     // 1
-await cache.increment('visits', { by: 4 });          // 5
-await cache.decrement('visits', { by: 2 });          // 3
+await cache.increment('visits'); // 1
+await cache.increment('visits', { by: 4 }); // 5
+await cache.decrement('visits', { by: 2 }); // 3
 await cache.increment('otp:sent', { ttlSeconds: 600 });
 ```
 
@@ -97,16 +94,16 @@ non-JSON-serializable value passed to `set` rejects with
 Every rejection carries a stable code. Branch on `error.code` to decide
 fail-open vs fail-closed — security callers must fail closed:
 
-| Code | Meaning |
-|---|---|
-| `CACHE_UNAVAILABLE` | Backend unreachable or the driver operation failed |
-| `CACHE_SERIALIZATION_FAILED` | `set` received a non-JSON-serializable value |
+| Code                           | Meaning                                                  |
+| ------------------------------ | -------------------------------------------------------- |
+| `CACHE_UNAVAILABLE`            | Backend unreachable or the driver operation failed       |
+| `CACHE_SERIALIZATION_FAILED`   | `set` received a non-JSON-serializable value             |
 | `CACHE_DESERIALIZATION_FAILED` | Stored payload is corrupt or was written by another tool |
-| `CACHE_VALUE_NOT_INTEGER` | A counter operation hit a non-integer value |
-| `CACHE_INVALID_TTL` | TTL missing, non-finite or not positive |
-| `CACHE_LOCK_NOT_ACQUIRED` | `withLock` could not take the lock |
-| `CACHE_UNSUPPORTED_OPERATION` | The engine does not implement the operation |
-| `CACHE_CONFIG_INVALID` | Invalid provider configuration |
+| `CACHE_VALUE_NOT_INTEGER`      | A counter operation hit a non-integer value              |
+| `CACHE_INVALID_TTL`            | TTL missing, non-finite or not positive                  |
+| `CACHE_LOCK_NOT_ACQUIRED`      | `withLock` could not take the lock                       |
+| `CACHE_UNSUPPORTED_OPERATION`  | The engine does not implement the operation              |
+| `CACHE_CONFIG_INVALID`         | Invalid provider configuration                           |
 
 ## Advanced
 

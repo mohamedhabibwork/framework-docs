@@ -25,9 +25,9 @@ import { defineSchedule } from '@framework/scheduler';
 export const schedules = [
   defineSchedule({
     name: 'orders-nightly-summary',
-    cron: '0 3 * * *',                 // 03:00 every day
+    cron: '0 3 * * *', // 03:00 every day
     timezone: 'Europe/Berlin',
-    overlap: 'skip',                   // default: never run two at once
+    overlap: 'skip', // default: never run two at once
     dispatch: {
       kind: 'workflow',
       workflow: 'order-fulfillment',
@@ -69,7 +69,7 @@ builder receiving the fire time) or a registered workflow by name:
 ```ts
 defineSchedule({
   name: 'hourly-metrics',
-  cron: '17 * * * *',                          // quarter past every hour
+  cron: '17 * * * *', // quarter past every hour
   dispatch: {
     kind: 'job',
     job: collectMetrics,
@@ -80,14 +80,14 @@ defineSchedule({
 
 Laravel-style recipes, expressed as plain cron:
 
-| Cadence | Cron |
-|---|---|
-| Every five minutes | `*/5 * * * *` |
-| Hourly at :17 | `17 * * * *` |
-| Daily at 08:00 | `0 8 * * *` |
-| Nightly at 03:00 | `0 3 * * *` |
-| Weekly, Sunday midnight | `0 0 * * 0` |
-| First day of the month | `0 0 1 * *` |
+| Cadence                 | Cron          |
+| ----------------------- | ------------- |
+| Every five minutes      | `*/5 * * * *` |
+| Hourly at :17           | `17 * * * *`  |
+| Daily at 08:00          | `0 8 * * *`   |
+| Nightly at 03:00        | `0 3 * * *`   |
+| Weekly, Sunday midnight | `0 0 * * 0`   |
+| First day of the month  | `0 0 1 * *`   |
 
 ## What a fire looks like
 

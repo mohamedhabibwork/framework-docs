@@ -28,9 +28,9 @@ Every database test gets its own database (`fw_test_<random>`), created from
 Application-level tests use the generated `tests/support.ts`:
 
 ```ts
-const ctx = await createTestContext();   // boots the full app on a fresh migrated DB
+const ctx = await createTestContext(); // boots the full app on a fresh migrated DB
 const response = await ctx.client.request('/api/v1/products', jsonInit('POST', { name: 'x', price: '1' }));
-await ctx.close();                       // stops server, shuts down, drops the DB
+await ctx.close(); // stops server, shuts down, drops the DB
 ```
 
 `TEST_MODE=network` swaps in-process `http.request` for a real loopback

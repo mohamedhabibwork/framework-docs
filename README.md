@@ -29,9 +29,9 @@ Official documentation site and Markdown reference guides for [**mohamedhabibwor
 
 ## Commands
 
-| Command | Action |
-| :--- | :--- |
-| `bun install` | Install dependencies and link the vendored Satteri WASM binding |
-| `bun run dev` | Start local Starlight dev server at `http://localhost:4321` |
-| `bun run build` | Build static production site to `./dist/` |
-| `bun run preview` | Preview the production build locally |
+| Command           | Action                                                          |
+| :---------------- | :-------------------------------------------------------------- |
+| `bun install`     | Install dependencies and link the vendored Satteri WASM binding |
+| `bun run dev`     | Start local Starlight dev server at `http://localhost:4321`     |
+| `bun run build`   | Build static production site to `./dist/`                       |
+| `bun run preview` | Preview the production build locally                            |

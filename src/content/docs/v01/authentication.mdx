@@ -71,8 +71,10 @@ database provider, and after the cache provider when you want login throttling
 
 ```ts
 // bootstrap/http.ts
-export const http = createHttpKernel(app, { resolveActor: authActorResolver(app) })
-  .route('/api/v1/auth', authRoutes(config));
+export const http = createHttpKernel(app, { resolveActor: authActorResolver(app) }).route(
+  '/api/v1/auth',
+  authRoutes(config),
+);
 ```
 
 Finally, add the `auth` section to your config schema. `authConfigSchema`
@@ -82,16 +84,16 @@ supplies every default:
 auth: authConfigSchema,
 ```
 
-| Key | Default | Meaning |
-|---|---|---|
-| `guards` | `['session', 'api-token']` | Guards consulted in order; first match wins |
-| `session.cookie` | `fw_session` | Cookie carrying the opaque token |
-| `session.ttlSeconds` | `604800` (7 days) | Sliding session lifetime |
-| `session.secure` | `false` | Emit the `Secure` attribute — enable in production |
-| `token.ttlSeconds` | `2592000` (30 days) | Default token lifetime; `null` never expires |
-| `rateLimit.enabled` | `true` | Master switch for login throttling |
-| `rateLimit.maxAttempts` | `5` | Failed logins per email per window |
-| `rateLimit.windowSeconds` | `60` | Fixed-window length; the counter expires with it |
+| Key                       | Default                    | Meaning                                            |
+| ------------------------- | -------------------------- | -------------------------------------------------- |
+| `guards`                  | `['session', 'api-token']` | Guards consulted in order; first match wins        |
+| `session.cookie`          | `fw_session`               | Cookie carrying the opaque token                   |
+| `session.ttlSeconds`      | `604800` (7 days)          | Sliding session lifetime                           |
+| `session.secure`          | `false`                    | Emit the `Secure` attribute — enable in production |
+| `token.ttlSeconds`        | `2592000` (30 days)        | Default token lifetime; `null` never expires       |
+| `rateLimit.enabled`       | `true`                     | Master switch for login throttling                 |
+| `rateLimit.maxAttempts`   | `5`                        | Failed logins per email per window                 |
+| `rateLimit.windowSeconds` | `60`                       | Fixed-window length; the counter expires with it   |
 
 ## Usage
 
@@ -108,8 +110,16 @@ curl -X POST http://localhost:3000/api/v1/auth/register \
 ```
 
 ```json
-{ "user": { "id": "7f6c…", "name": "Ada", "email": "ada@example.test",
-            "emailVerifiedAt": null, "createdAt": "…", "updatedAt": "…" } }
+{
+  "user": {
+    "id": "7f6c…",
+    "name": "Ada",
+    "email": "ada@example.test",
+    "emailVerifiedAt": null,
+    "createdAt": "…",
+    "updatedAt": "…"
+  }
+}
 ```
 
 The response is `201` and carries `Set-Cookie: fw_session=…; HttpOnly;
@@ -260,8 +270,10 @@ isolated database, apply the three table definitions from
 `packages/auth/tests/routes.test.ts`, and drive the kernel directly:
 
 ```ts
-const http = createHttpKernel(app, { resolveActor: authActorResolver(app) })
-  .route('/auth', defineAuthRoutes({ service: AUTH_SERVICE, session: config.auth.session }));
+const http = createHttpKernel(app, { resolveActor: authActorResolver(app) }).route(
+  '/auth',
+  defineAuthRoutes({ service: AUTH_SERVICE, session: config.auth.session }),
+);
 
 const response = await http.request('/auth/login', {
   method: 'POST',

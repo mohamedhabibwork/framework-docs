@@ -7,19 +7,19 @@ description: 'Runtime, adapter and version decisions with their compatibility ma
 
 ## Compatibility matrix
 
-| Component | Pinned version | Notes |
-|---|---|---|
-| Bun | 1.4.2 | Only validated runtime |
-| TypeScript | 7.0.2 | `tsc` type checking only (`noEmit`) |
-| Hono | 4.13.13 | |
-| @hono/zod-validator | 0.9.1 | peer: zod ^4, hono ≥4.11.2 |
-| zod | 4.6.5 | `z.toJSONSchema` used for OpenAPI |
-| drizzle-orm | 0.45.4 | latest stable (1.0 is RC; not adopted) |
-| drizzle-kit | 0.31.11 | migration generation/check only |
-| drizzle-zod | 0.8.3 | standalone package behind `@framework/database` adapter |
-| postgres (postgres-js) | 3.4.9 | |
-| PostgreSQL | 17 (alpine image) | `deployment/compose.yaml`, port 54329 on loopback |
-| Biome | 2.5.15 | lint + format |
+| Component              | Pinned version    | Notes                                                   |
+| ---------------------- | ----------------- | ------------------------------------------------------- |
+| Bun                    | 1.4.2             | Only validated runtime                                  |
+| TypeScript             | 7.0.2             | `tsc` type checking only (`noEmit`)                     |
+| Hono                   | 4.13.13           |                                                         |
+| @hono/zod-validator    | 0.9.1             | peer: zod ^4, hono ≥4.11.2                              |
+| zod                    | 4.6.5             | `z.toJSONSchema` used for OpenAPI                       |
+| drizzle-orm            | 0.45.4            | latest stable (1.0 is RC; not adopted)                  |
+| drizzle-kit            | 0.31.11           | migration generation/check only                         |
+| drizzle-zod            | 0.8.3             | standalone package behind `@framework/database` adapter |
+| postgres (postgres-js) | 3.4.9             |                                                         |
+| PostgreSQL             | 17 (alpine image) | `deployment/compose.yaml`, port 54329 on loopback       |
+| Biome                  | 2.5.15            | lint + format                                           |
 
 ## Decisions
 

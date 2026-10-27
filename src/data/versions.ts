@@ -19,22 +19,22 @@
  *   first, each served from its Starlight locale (`0.1` → `/v01/...`).
  */
 export const docsVersions = {
-	/** The docs line matching the current framework release. */
-	latest: '0.2',
-	/** Every docs line, newest first. */
-	lines: ['0.2', '0.1'],
+  /** The docs line matching the current framework release. */
+  latest: '0.2',
+  /** Every docs line, newest first. */
+  lines: ['0.2', '0.1'],
 } as const;
 
 export type DocsVersionLine = (typeof docsVersions.lines)[number];
 
 /** `0.1` → `v0.1` — the display form used in labels and prose. */
 export function formatLine(line: string): string {
-	return `v${line}`;
+  return `v${line}`;
 }
 
 /** `0.1` → `v01` — the Starlight locale id for a frozen docs line. */
 export function localeIdFor(line: string): string {
-	return `v${line.replaceAll('.', '')}`;
+  return `v${line.replaceAll('.', '')}`;
 }
 
 /**
@@ -43,10 +43,10 @@ export function localeIdFor(line: string): string {
  * so snapshots must live inside that collection to be routable.
  */
 export function localeDirFor(line: string): string {
-	return `docs/${localeIdFor(line)}`;
+  return `docs/${localeIdFor(line)}`;
 }
 
 /** True for every known line except the latest one. */
 export function isArchived(line: string): boolean {
-	return line !== docsVersions.latest && (docsVersions.lines as readonly string[]).includes(line);
+  return line !== docsVersions.latest && (docsVersions.lines as readonly string[]).includes(line);
 }

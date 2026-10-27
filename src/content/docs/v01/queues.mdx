@@ -30,12 +30,12 @@ export const resizeImage = defineJob({
   name: 'images.resize',
   version: 1,
   payload: z.object({ imageId: z.string().uuid() }),
-  attempts: 3,                                  // total tries (default 3)
-  backoffMs: 1_000,                             // exponential backoff (default 1s)
-  timeoutMs: 60_000,                            // hard timeout (default 5 minutes)
+  attempts: 3, // total tries (default 3)
+  backoffMs: 1_000, // exponential backoff (default 1s)
+  timeoutMs: 60_000, // hard timeout (default 5 minutes)
   idempotencyKey: (payload) => `resize-${payload.imageId}`,
   async handle(payload, ctx) {
-    await ctx.progress(50);                     // reported to BullMQ
+    await ctx.progress(50); // reported to BullMQ
     return { resized: payload.imageId };
   },
 });
@@ -86,8 +86,8 @@ ever reaches Redis. Options override the definition per dispatch:
 
 ```ts
 await queue.dispatch(resizeImage, { imageId }, ctx, {
-  delayMs: 60_000,   // run in one minute
-  attempts: 5,       // override the definition's try count
+  delayMs: 60_000, // run in one minute
+  attempts: 5, // override the definition's try count
 });
 ```
 
@@ -106,8 +106,8 @@ any other error. When attempts are exhausted the job lands in the failed set,
 where you can inspect and requeue it:
 
 ```ts
-const failed = await queue.failed(50);   // recent failures, newest first
-await queue.retry(failed[0].id);         // re-queue, payload unchanged
+const failed = await queue.failed(50); // recent failures, newest first
+await queue.retry(failed[0].id); // re-queue, payload unchanged
 ```
 
 Three failures never retry: an unknown job name, a version mismatch, and a
@@ -128,13 +128,14 @@ const { batchId, jobIds } = await queue.dispatchBatch(
   [{ imageId: 'a' }, { imageId: 'b' }, { imageId: 'c' }],
   ctx,
   {
-    batchId: `resize-${uploadId}`,         // optional; generated when omitted
-    onComplete: {                          // dispatched once the batch settles
+    batchId: `resize-${uploadId}`, // optional; generated when omitted
+    onComplete: {
+      // dispatched once the batch settles
       name: 'images.resize-finished',
       version: 1,
       payload: { uploadId },
     },
-    ttlSeconds: 7 * 24 * 60 * 60,          // bookkeeping retention (default 7 days)
+    ttlSeconds: 7 * 24 * 60 * 60, // bookkeeping retention (default 7 days)
   },
 );
 ```
@@ -148,7 +149,7 @@ const batch = await queue.batchStatus(batchId);
 // { state: 'running' | 'completed' | 'partially-failed' | 'cancelled', total, completed, failed }
 
 const failures = await queue.batchFailures(batchId); // JobStatus of the failed members
-await queue.cancelBatch(batchId);                    // pending members fail fast
+await queue.cancelBatch(batchId); // pending members fail fast
 ```
 
 Only the final attempt of a member counts as a batch failure — in-flight
