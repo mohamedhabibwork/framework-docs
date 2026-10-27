@@ -1,0 +1,47 @@
+---
+title: Framework
+description: Laravel-inspired TypeScript framework on Bun + Hono + Drizzle + Zod.
+template: splash
+hero:
+  tagline: Type-safe APIs with CRUD generators, an audit trail, events, queues and OpenAPI — batteries included, defaults that run.
+  actions:
+    - text: Get started
+      link: /getting-started/
+      icon: right-arrow
+    - text: CLI reference
+      link: /cli-reference/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What's inside
+
+<CardGrid stagger>
+	<Card title="One-command apps" icon="rocket">
+		`bun run cli -- create apps/my-api --with-demo` generates a complete
+		application — config, providers, health/audit/realtime routes, server,
+		worker and CLI — and a sample CRUD module.
+	</Card>
+	<Card title="CRUD generator" icon="pencil">
+		`make:crud` derives schemas, DTOs, repositories, services, controllers,
+		routes, OpenAPI metadata and endpoint tests from one Drizzle table — then
+		verifies them against real PostgreSQL.
+	</Card>
+	<Card title="Laravel-style helpers" icon="puzzle">
+		`config()`, `env()`, `abort()`, `logger()`, `retry()` and context helpers
+		that know the current request — typed, scope-aware, no globals.
+	</Card>
+	<Card title="Audit trail" icon="document">
+		Every write lands in `audit_logs` in the same transaction, with
+		field-level diffs, actor and correlation id — queryable over HTTP.
+	</Card>
+	<Card title="Events & realtime" icon="lightbulb">
+		A typed event bus (in-memory or Redis pub/sub) feeding WebSocket
+		subscribers through a channel-allowlisted `/ws` endpoint.
+	</Card>
+	<Card title="Queues" icon="clock">
+		BullMQ jobs with versioned, validated payloads, idempotency keys, retry
+		with backoff, timeouts and a graceful-draining worker.
+	</Card>
+</CardGrid>

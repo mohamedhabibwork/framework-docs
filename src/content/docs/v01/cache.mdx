@@ -1,0 +1,214 @@
+---
+title: Cache
+description: 'Application cache, distributed locks and rate limiting on one driver — memory for a single process, Redis for shared state.'
+---
+
+# Cache
+
+`@framework/cache` gives every module one application cache, one lock store
+and one rate limiter, all backed by the same driver: `memory` for a single
+process (development and tests) or `redis` for state shared across instances.
+Values are JSON-serializable, every failure rejects with a catalogued
+`CACHE_*` code (never a silent bypass), and each driver reports what it can
+and cannot do through a capabilities object. This is application caching — it
+is conceptually separate from Hono's HTTP response cache (`hono/cache`
+middleware), so never store HTTP responses in it.
+
+## Setup
+
+Register the provider once (before consumers such as auth), selecting the
+driver from your application configuration:
+
+```ts
+// app/providers/cache.provider.ts
+import { createCacheProvider } from '@framework/cache';
+import { defineProvider } from '@framework/core';
+import type { AppConfig } from '../../config';
+
+export const cacheProvider = defineProvider<AppConfig>(
+  createCacheProvider<AppConfig>((config: AppConfig) => ({
+    driver: config.cache.driver,
+    redis:
+      config.cache.driver === 'redis'
+        ? { url: config.cache.url, prefix: config.cache.prefix }
+        : undefined,
+  })),
+);
+```
+
+The provider validates its section (`driver` is `memory` or `redis`; `redis`
+requires both `url` and `prefix`) and registers three singletons, each closed
+with the container at shutdown:
+
+| Token | Contract | Purpose |
+|---|---|---|
+| `CACHE` | `Cache` | get/set/remember, atomic counters |
+| `LOCK_STORE` | `LockStore` | named, expiring locks with owner tokens |
+| `RATE_LIMITER` | `RateLimiter` | fixed-window counting |
+
+### Configuration
+
+The generated app maps environment variables onto the `cache` section:
+
+```sh
+CACHE_DRIVER=redis                 # or: memory (the provider schema's own default)
+CACHE_URL=redis://127.0.0.1:6379   # falls back to REDIS_URL when unset
+CACHE_PREFIX=playground            # namespace; several apps can share one Redis
+```
+
+`driver: 'memory'` needs nothing else — every service is per-process.
+`driver: 'redis'` gives each service its own dedicated connection, namespaced
+under `CACHE_PREFIX`, so a cache key can never collide with another
+application's keys on the same Redis.
+
+## Usage
+
+Resolve `CACHE` from a scope and use the map-style API. Keys live only in
+your namespace; `clear()` never flushes a shared Redis database.
+
+```ts
+import { CACHE } from '@framework/cache';
+
+const cache = scope.resolve(CACHE);
+
+// Plain values, optional TTL in seconds (omit for no expiry)
+await cache.set('user:1', { id: 'u1', roles: ['admin'] }, 60);
+const user = await cache.get<{ id: string; roles: string[] }>('user:1'); // null on miss
+await cache.has('user:1');    // true
+await cache.delete('user:1'); // true when an unexpired entry was removed
+
+// Read-through memoization: factory runs only on a miss
+const stats = await cache.remember('dashboard:stats', 300, () => computeStats());
+
+// Atomic counters — the TTL applies only when the counter is first created
+await cache.increment('visits');                     // 1
+await cache.increment('visits', { by: 4 });          // 5
+await cache.decrement('visits', { by: 2 });          // 3
+await cache.increment('otp:sent', { ttlSeconds: 600 });
+```
+
+Counters are atomic under concurrent writers and reject with
+`CACHE_VALUE_NOT_INTEGER` when the stored value is not an integer. A
+non-JSON-serializable value passed to `set` rejects with
+`CACHE_SERIALIZATION_FAILED` instead of storing garbage.
+
+### Errors
+
+Every rejection carries a stable code. Branch on `error.code` to decide
+fail-open vs fail-closed — security callers must fail closed:
+
+| Code | Meaning |
+|---|---|
+| `CACHE_UNAVAILABLE` | Backend unreachable or the driver operation failed |
+| `CACHE_SERIALIZATION_FAILED` | `set` received a non-JSON-serializable value |
+| `CACHE_DESERIALIZATION_FAILED` | Stored payload is corrupt or was written by another tool |
+| `CACHE_VALUE_NOT_INTEGER` | A counter operation hit a non-integer value |
+| `CACHE_INVALID_TTL` | TTL missing, non-finite or not positive |
+| `CACHE_LOCK_NOT_ACQUIRED` | `withLock` could not take the lock |
+| `CACHE_UNSUPPORTED_OPERATION` | The engine does not implement the operation |
+| `CACHE_CONFIG_INVALID` | Invalid provider configuration |
+
+## Advanced
+
+### Capabilities
+
+Ask the driver before using an operation it may not support — capabilities
+are mapped from the underlying engine and never faked:
+
+```ts
+const { capabilities } = scope.resolve(CACHE);
+// memory: atomicIncrement, locking, tags, clearNamespace: true, distributedLocks: false
+// redis:  atomicIncrement, locking, distributedLocks: true, tags: false, clearNamespace: false
+```
+
+Two consequences worth knowing:
+
+- `clear()` wipes the namespace and returns the deleted count on memory, but
+  the Redis engine deliberately cannot clear a namespace: on Redis,
+  `clear()` — with or without a prefix — rejects with
+  `CACHE_UNSUPPORTED_OPERATION` and leaves every key untouched. Delete known
+  keys instead; a prefix-scoped clear is unsupported on every driver.
+- Tagged group invalidation is memory-only; Redis does not emulate it.
+
+### Locks
+
+`LOCK_STORE` hands out named locks that expire after `ttlMs` and carry an
+owner token: only the acquirer's store can release the lock it took — another
+store's `release` resolves `false` without touching it.
+
+```ts
+import { CACHE_ERROR_CODES, LOCK_STORE } from '@framework/cache';
+
+const locks = scope.resolve(LOCK_STORE);
+
+try {
+  await locks.withLock('reports:daily', 30_000, () => buildDailyReport());
+} catch (error) {
+  if (error.code === CACHE_ERROR_CODES.LOCK_NOT_ACQUIRED) {
+    // Another worker holds the lock — skip or retry, never fail the schedule
+  }
+}
+
+// Or manage the lifecycle yourself
+if (await locks.acquire('imports:catalog', 60_000)) {
+  try {
+    /* … */
+  } finally {
+    await locks.release('imports:catalog');
+  }
+}
+```
+
+`withLock` runs the function and releases when it settles; it rejects with
+`CACHE_LOCK_NOT_ACQUIRED` when the lock is held elsewhere — it is never
+silently skipped. With Redis the locks are distributed (one winner across
+every instance); with memory they protect within one process. The scheduler
+uses the same lock to keep overlapping runs out — see [Queues](/queues/).
+
+### Rate limiting
+
+`RATE_LIMITER` is a fixed-window limiter: every `consume` counts, including
+rejected attempts, and the window key carries a TTL so a crashed client
+cannot block forever.
+
+```ts
+import { RATE_LIMITER } from '@framework/cache';
+
+const limiter = scope.resolve(RATE_LIMITER);
+const result = await limiter.consume(`login:${email}`, 5, 60);
+if (!result.allowed) {
+  throw tooManyRequests(result.retryAfterSeconds);
+}
+
+// After a successful login, give the key a clean window
+await limiter.reset(`login:${email}`);
+```
+
+`consume` resolves `{ allowed, remaining, retryAfterSeconds }`;
+`retryAfterSeconds` is `0` while the request was allowed. On Redis the count
+is shared across instances, which is exactly what login throttling and
+security limits need.
+
+## Testing
+
+For unit tests, construct the memory drivers directly — no provider, no
+container, nothing to clean up:
+
+```ts
+import { MemoryCache, MemoryLockStore, MemoryRateLimiter } from '@framework/cache';
+
+const cache = new MemoryCache();
+await cache.set('k', { n: 1 }, 60);
+expect(await cache.get<{ n: number }>('k')).toEqual({ n: 1 });
+```
+
+For real behavior — expiry timing, lock contention, state shared across
+connections — run the real driver. The package suites start Redis with
+`bun run db:up` and point `REDIS_URL` at it (see `.env.test.example`); they
+purge their own namespace with SCAN/DEL, never `FLUSHDB`, so a shared Redis
+stays intact. Fakes prove wiring, not infrastructure: atomic increments
+across connections and one-winner lock contention are only proven against
+real Redis.
+
+Related: the [Notifications](/notifications/) guide covers outbound
+messaging, which sits behind the same rate limiting.

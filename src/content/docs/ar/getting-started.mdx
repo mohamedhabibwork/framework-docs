@@ -1,0 +1,82 @@
+---
+title: البدء
+description: من الصفر إلى واجهة برمجية عاملة على PostgreSQL حقيقي — التطبيق المرجعي والتطبيقات المولّدة.
+---
+
+النسخة العربية من التوثيق متاحة اعتباراً من v0.1 (بعض الصفحات تعرض النسخة الإنجليزية).
+
+## المتطلبات
+
+| الأداة | الغرض |
+|---|---|
+| [Bun](https://bun.sh) ≥ 1.4 | بيئة التشغيل ومدير الحزم ومشغّل الاختبارات |
+| Docker (أو PostgreSQL 17 + Redis 7) | البنية التحتية المحلية عبر compose |
+
+## المسار أ — تشغيل التطبيق المرجعي
+
+```sh
+bun install                                          # تثبيت مساحة عمل الإطار
+bun run db:up                                        # PostgreSQL :54329 + Redis :63799
+cp .env.test.example .env.test                       # TEST_DATABASE_URL لاختبارات النقاط
+cp apps/playground/.env.example apps/playground/.env # DATABASE_URL للتطبيق
+bun run cli -- db:migrate                            # تطبيق الترحيلات
+bun run dev                                          # http://127.0.0.1:3000
+```
+
+جرّبها:
+
+```sh
+curl -s localhost:3000/health/ready
+curl -s -X POST localhost:3000/api/v1/products -H 'content-type: application/json' \
+  -d '{"name":"coffee","price":"12.50"}'
+curl -s 'localhost:3000/api/v1/products?page=1&limit=10'
+curl -s 'localhost:3000/audit?resource=products&limit=5'
+```
+
+## المسار ب — توليد تطبيقك الخاص (أمر واحد)
+
+من جذر مساحة عمل الإطار:
+
+```sh
+bun run cli -- create apps/my-api --with-demo
+```
+
+هذا الأمر الواحد يولّد التطبيق الكامل (الإعدادات، التمهيد، المزوّدات، مسارات
+health/audit/realtime، نقاط دخول الخادم والعامل وواجهة الأوامر، الاختبارات،
+ملف compose)، ويثبّت الاعتماديات عبر مساحة العمل، ثم يشغّل `make:crud` داخل
+التطبيق الجديد لإضافة وحدة **products** نموذجية مع ترحيل قاعدة البيانات
+ومجموعة اختبارات نقاط النهاية.
+
+بعد ذلك:
+
+```sh
+cd apps/my-api
+cp .env.example .env                                  # عيّن DATABASE_URL / REDIS_URL
+docker compose -f deployment/compose.yaml up -d --wait
+bun run cli -- db:migrate                             # تطبيق الترحيل المولّد
+bun run dev                                           # http://127.0.0.1:3000
+bun test                                              # مجموعة النقاط على قاعدة بيانات معزولة
+```
+
+عمليات اختيارية:
+
+```sh
+bun run worker        # عامل الطوابير (مكافئ لـ: bun run cli -- queue:work)
+```
+
+بدون `--with-demo` تحصل على التطبيق الفارغ؛ أضف الوحدات وقت الحاجة:
+
+```sh
+bun run cli -- make:crud Product --module products \
+  --fields 'name:text:required,price:numeric:required' --access public --verify
+```
+
+يتحقق `--verify` من الأنواع ويشغّل مجموعة اختبارات نقاط النهاية المولّدة على
+قاعدة بيانات PostgreSQL معزولة ومُرحّلة، ثم يعرض كل مسار مُختبَراً.
+استخدم `--dry-run` لمعاينة كل تغيير قبل الكتابة.
+
+## الخطوات التالية
+
+- [مرجع واجهة الأوامر](/cli-reference/) — كل أمر وخيار ومثال
+- [دليل المنصة](/platform/) — السياق، الأخطاء، التدقيق، الأحداث، الطوابير، الاستيراد/التصدير
+- [حالة التنفيذ](/status/) — ما هو مُتحقَّق منه أو مُنفَّذ أو مُخطَّط

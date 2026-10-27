@@ -1,0 +1,188 @@
+---
+title: Queues
+description: 'Versioned jobs, retries, timeouts, batches and workers over BullMQ and Redis.'
+---
+
+# Queues
+
+Heavy work belongs off the request path. The `@framework/queue` package gives
+you durable background jobs on BullMQ and Redis: payloads are zod-validated
+before anything is enqueued, handlers run in their own scope carrying the
+dispatcher's identity, and failures retry with backoff until they exhaust
+their attempts.
+
+Jobs are at-least-once: BullMQ may redeliver, so handlers must be idempotent.
+Per ADR-11 the enqueue transport rides the external queuekit package behind
+an internal adapter seam, while job contracts, worker scopes and batch
+bookkeeping stay framework-owned. The [platform guide](/platform/) shows the
+quick overview — this page is the full guide.
+
+## Setup
+
+A job is a versioned, validated contract. Define it next to the module that
+owns the work:
+
+```ts
+import { defineJob } from '@framework/queue';
+import { z } from 'zod/v4';
+
+export const resizeImage = defineJob({
+  name: 'images.resize',
+  version: 1,
+  payload: z.object({ imageId: z.string().uuid() }),
+  attempts: 3,                                  // total tries (default 3)
+  backoffMs: 1_000,                             // exponential backoff (default 1s)
+  timeoutMs: 60_000,                            // hard timeout (default 5 minutes)
+  idempotencyKey: (payload) => `resize-${payload.imageId}`,
+  async handle(payload, ctx) {
+    await ctx.progress(50);                     // reported to BullMQ
+    return { resized: payload.imageId };
+  },
+});
+```
+
+The handler receives a `ctx` with `jobId`, `attempt`, `scope`, `execution`,
+an abort `signal` and `progress(percent)`. The `idempotencyKey` becomes the
+queue job id, so two concurrent dispatches of the same logical work collapse
+into one job.
+
+Register your handlers in `app/jobs/index.ts`:
+
+```ts
+import type { JobList } from '@framework/queue';
+import { productImportJob, productExportJob } from './products.jobs';
+
+export const jobs: JobList = [productImportJob, productExportJob];
+```
+
+The worker is its own process — `bin/worker.ts` in generated apps:
+
+```ts
+const queue = new QueueManager({ url: config.redis.url, prefix: config.queue.prefix, queue: config.queue.name });
+const worker = new JobWorker(queue, application, jobs, {
+  concurrency: config.queue.concurrency,
+  onFailed: (job, error) => console.error(`job ${job.name} (${job.id ?? '?'}) failed`, error),
+});
+worker.start();
+```
+
+Run it with `bun run worker` or `bun run cli -- queue:work`. Workers drain
+gracefully on SIGTERM/SIGINT: they stop taking new jobs and wait for active
+ones within your shutdown deadline.
+
+## Dispatching
+
+Resolve the queue from the scope and dispatch with the current execution
+context, so the job's audit rows and events are attributed to whoever asked
+for it:
+
+```ts
+const queue = scope.resolve(QUEUE);
+const { id } = await queue.dispatch(resizeImage, { imageId }, scope.resolve(EXECUTION_CONTEXT));
+```
+
+`dispatch` validates the payload first — an invalid payload throws before it
+ever reaches Redis. Options override the definition per dispatch:
+
+```ts
+await queue.dispatch(resizeImage, { imageId }, ctx, {
+  delayMs: 60_000,   // run in one minute
+  attempts: 5,       // override the definition's try count
+});
+```
+
+Inspect a job by id — state, progress, attempts, result and failure reason:
+
+```ts
+const status = await queue.status(id);
+// { state: 'completed', progress: 100, result: { resized: '...' }, ... }
+```
+
+## Retries and timeouts
+
+A handler that throws is retried up to `attempts` with exponential backoff.
+Each run is bounded by `timeoutMs`; an aborted timeout fails the attempt like
+any other error. When attempts are exhausted the job lands in the failed set,
+where you can inspect and requeue it:
+
+```ts
+const failed = await queue.failed(50);   // recent failures, newest first
+await queue.retry(failed[0].id);         // re-queue, payload unchanged
+```
+
+Three failures never retry: an unknown job name, a version mismatch, and a
+payload that fails validation on the worker. All three throw an
+unrecoverable error — if you bump `version` on a job, deploy the worker that
+understands it before dispatching the new envelope.
+
+## Batches
+
+`dispatchBatch` fans out one job per payload under a single batch id. All
+payloads are validated before anything is enqueued, and bookkeeping lives in
+Redis with atomic counters, so exactly one worker observes the final
+transition:
+
+```ts
+const { batchId, jobIds } = await queue.dispatchBatch(
+  resizeImage,
+  [{ imageId: 'a' }, { imageId: 'b' }, { imageId: 'c' }],
+  ctx,
+  {
+    batchId: `resize-${uploadId}`,         // optional; generated when omitted
+    onComplete: {                          // dispatched once the batch settles
+      name: 'images.resize-finished',
+      version: 1,
+      payload: { uploadId },
+    },
+    ttlSeconds: 7 * 24 * 60 * 60,          // bookkeeping retention (default 7 days)
+  },
+);
+```
+
+The completion job is a regular registered job dispatched with a system actor
+and the batch id as correlation id — register it on your workers like any
+other job. Track and steer the batch as it runs:
+
+```ts
+const batch = await queue.batchStatus(batchId);
+// { state: 'running' | 'completed' | 'partially-failed' | 'cancelled', total, completed, failed }
+
+const failures = await queue.batchFailures(batchId); // JobStatus of the failed members
+await queue.cancelBatch(batchId);                    // pending members fail fast
+```
+
+Only the final attempt of a member counts as a batch failure — in-flight
+retries keep the batch running. Batches are bookkeeping, not durability: for
+long fan-outs with full history and compensation, use a
+[workflow](/workflows/) instead.
+
+## Pausing and counts
+
+`queue.pause()` stops the worker-side consumption from making progress and
+`queue.resume()` restores it, while `queue.counts()` reports jobs per state
+(`waiting`, `active`, `completed`, `failed`, `delayed`, `paused`) — the same
+numbers `queue:status` prints:
+
+```bash
+bun run cli -- queue:status
+bun run cli -- queue:work --queue default --concurrency 4
+```
+
+## Testing
+
+Point the manager at your test Redis and poll until jobs settle — the
+framework's own suite runs against real infrastructure, and so should yours:
+
+```ts
+const manager = new QueueManager({ url: redisUrl, prefix: `test-${crypto.randomUUID()}`, queue: 'tests' });
+const worker = new JobWorker(manager, application, [resizeImage], { concurrency: 2 });
+worker.start();
+
+const status = await manager.status(id);
+expect(status).toMatchObject({ state: 'completed', progress: 100 });
+```
+
+Assert on the scoped execution context as well: each handler sees a fresh
+`job` scope whose execution context carries the dispatcher's actor and
+correlation id. See [Testing](/testing/) for database fixtures, and
+[Scheduling](/scheduling/) for cron-driven dispatch onto these queues.
