@@ -102,6 +102,7 @@ on the text path.
 |            | `search:index`       | Import declared search indexes from their source tables (derived, rebuildable storage) |
 |            | `search:status`      | Show the configured search driver, its capabilities and declared indexes               |
 | storage    | `storage:check`      | Validate disk configuration (read-only; roots are reported, never created)             |
+|            | `storage:link`       | Link a public local disk root into `public/storage` (idempotent; `--force` re-points)  |
 | tooling    | `format`             | Format sources; --check performs no writes                                             |
 |            | `lint`               | Run configured lint tools; --fix applies safe fixes explicitly                         |
 |            | `test`               | Run the configured test suites (bun test)                                              |
@@ -327,11 +328,12 @@ so CLI indexing refuses it with exit `3` instead of silently doing nothing.
 
 ## Cache and maintenance
 
-| Command                                    | Effect                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------ |
-| `cache:clear [--store <name>] [--confirm]` | Clear the cache namespace (`--dry-run` previews; `--confirm` required)   |
-| `session:prune [--confirm]`                | Remove expired sessions (`--dry-run` only counts them)                   |
-| `storage:check`                            | Validate disk configuration read-only; roots are reported, never created |
+| Command                                    | Effect                                                                       |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
+| `cache:clear [--store <name>] [--confirm]` | Clear the cache namespace (`--dry-run` previews; `--confirm` required)       |
+| `session:prune [--confirm]`                | Remove expired sessions (`--dry-run` only counts them)                       |
+| `storage:check`                            | Validate disk configuration read-only; roots are reported, never created     |
+| `storage:link [--disk <name>] [--force]`   | Symlink the public local disk root into `public/storage` (`--link` moves it) |
 
 Each requires the matching provider to be registered in
 `bootstrap/providers.ts`; without it the command exits `3` with an actionable
@@ -363,7 +365,7 @@ and exits with code `3` when invoked:
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `make:model`, `make:integration`, `integration:*`                | The ORM layer is out of scope; adapters are not a supported surface                                         |
 | `db:rollback`                                                    | Migrations are forward-only by decision — use `db:fresh` (non-production) or author a new forward migration |
-| `cache:prune`, `storage:link`, `storage:prune`                   | Adapter-specific cleanup that no shipped driver needs yet                                                   |
+| `cache:prune`, `storage:prune`                                   | Adapter-specific cleanup that no shipped driver needs yet                                                   |
 | `oauth:client:create`, `oauth:client:list`, `oauth:key:generate` | Client registration and key generation are code/API-level today ([OAuth server](/oauth-server/))            |
 | `observatory:*`                                                  | The package ships contracts only ([Packages](/packages/))                                                   |
 | `socialite:providers`                                            | The package ships contracts only ([Packages](/packages/))                                                   |
