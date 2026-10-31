@@ -60,6 +60,7 @@ on the text path.
 |            | `make:migration`     | Empty custom SQL migration registered in the Drizzle journal                           |
 |            | `make:module`        | Module routes/provider/exports; --crud delegates to make:crud                          |
 |            | `make:notification`  | Notification with explicit channels and one builder per channel                        |
+|            | `make:model`         | Thin model metadata and serialization derived from the Drizzle table                   |
 |            | `make:policy`        | Resource policy for the five CRUD abilities                                            |
 |            | `make:provider`      | Provider lifecycle factory registered in bootstrap/providers.ts                        |
 |            | `make:repository`    | Typed Drizzle repository composed from CRUD mixins                                     |
@@ -228,7 +229,7 @@ to the same `make:crud` pipeline.
 ### Single-artifact generators
 
 `make:schema`, `make:repository`, `make:dto`, `make:request`, `make:response`,
-`make:service`, `make:controller`, `make:policy`.
+`make:model`, `make:service`, `make:controller`, `make:policy`.
 
 One artifact of the `make:crud` pipeline at a time, rendered by the same code so
 output is byte-identical to a whole-module generation. Table-coupled slices
@@ -236,6 +237,14 @@ introspect an existing Drizzle export (`--table`, default: the resource's
 plural) and refuse with actionable hints when a sibling artifact they import is
 missing — `make:schema` starts a table-first module, `make:crud` remains the
 whole-module path.
+
+`make:model` is the one exception to the byte-identical rule: `make:crud` does
+not generate a model. It writes `models/<name>.model.ts` with the table name,
+primary key, soft-delete flag, a column list read from the Drizzle table at
+runtime, and a `serialize(row)` that turns `Date` values into ISO-8601 strings.
+It declares no column itself, so the table stays the only schema source. The
+migration stub from the specification is not generated; use
+`db:generate --name <name>` after changing the table.
 
 ### Runtime scaffolds
 
@@ -363,7 +372,7 @@ and exits with code `3` when invoked:
 
 | Command                                                          | Why it is not shipped yet                                                                                   |
 | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `make:model`, `make:integration`, `integration:*`                | The ORM layer is out of scope; adapters are not a supported surface                                         |
+| `make:integration`, `integration:*`                              | Adapters are not a supported surface                                                                        |
 | `db:rollback`                                                    | Migrations are forward-only by decision — use `db:fresh` (non-production) or author a new forward migration |
 | `cache:prune`, `storage:prune`                                   | Adapter-specific cleanup that no shipped driver needs yet                                                   |
 | `oauth:client:create`, `oauth:client:list`, `oauth:key:generate` | Client registration and key generation are code/API-level today ([OAuth server](/oauth-server/))            |
