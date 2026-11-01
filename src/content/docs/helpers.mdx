@@ -13,6 +13,36 @@ import { config, env, abort, logger, correlationId } from '@framework/support';
 
 ## Configuration
 
+### `defineConfig(sections)` and `fromEnv(name, schema)`
+
+`@framework/core` composes the config schema from sections and derives the
+environment mapping from `fromEnv` bindings, so there is no hand-written
+`mapEnvironment` to keep in sync:
+
+```ts
+import { defineConfig, fromEnv, type InferConfig } from '@framework/core';
+import { z } from 'zod/v4';
+
+export const appConfig = defineConfig({
+  app: z.object({ name: fromEnv('APP_NAME', z.string().min(1).default('my-app')) }),
+  http: z.object({ port: fromEnv('HTTP_PORT', z.coerce.number().int().default(3000)) }),
+  database: z.object({ url: fromEnv('DATABASE_URL', z.url({ protocol: /^postgres(ql)?$/ })) }),
+});
+
+export type AppConfig = InferConfig<typeof appConfig>;
+export const loadAppConfig = () => appConfig.load(); // .env, then process env, then defaults
+```
+
+- **Sections:** required sections are always built, so their defaults apply.
+  An `.optional()` section appears only when one of its variables is set.
+- **`envKeys`** lists every bound variable in shape order, which is useful for
+  generating `.env.example`.
+- **`parse(env)`** validates a given environment without touching files.
+- **Errors:** validation failures name the path (`database.url`), never the
+  value.
+- **Bindings:** give `fromEnv` a fresh schema each time, because the binding
+  belongs to that schema instance.
+
 ### `config(path, fallback?)`
 
 Dot-path access into the booted application's validated config — the same frozen object the container exposes as `CONFIG`:
