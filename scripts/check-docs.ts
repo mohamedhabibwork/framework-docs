@@ -110,8 +110,8 @@ for (const name of catalogued) {
 const guides = (await readdir(docsDir)).filter((name) => name.endsWith('.md'));
 const publishedSources = new Set(PAGES.map((page) => page.source));
 for (const name of guides) {
-  // Hub, plan and the upgrade report are repository documents, not site guides.
-  if (['README.md', 'enhancement-plan.md', 'documentation-upgrade.md'].includes(name)) continue;
+  // Hub, plans and the upgrade report are repository documents, not site guides.
+  if (['README.md', 'enhancement-plan.md', 'roadmap-v1.md', 'documentation-upgrade.md'].includes(name)) continue;
   if (!publishedSources.has(`docs/${name}`)) fail(`docs/${name} is not published (add it to PAGES in sync-docs.ts)`);
 }
 
