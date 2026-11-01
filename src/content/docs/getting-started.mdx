@@ -91,6 +91,39 @@ against an isolated, migrated PostgreSQL database, and reports every tested
 route. `--dry-run` previews every file change first. See the
 [CLI reference](/cli-reference/#makecrud-resource) for the full option list.
 
+## Path C — start a standalone application from the template
+
+You do not need the framework workspace to build on it. The released starter
+lives in [`mohamedhabibwork/framework-app`](https://github.com/mohamedhabibwork/framework-app)
+and resolves every `@framework/*` package from its published `#standalone`
+branch on GitHub, so it installs anywhere:
+
+```sh
+bun create mohamedhabibwork/framework-app my-api   # clone, install, git init
+# or, with the GitHub CLI:
+gh repo create my-api --template mohamedhabibwork/framework-app --clone --private
+```
+
+Use the `owner/repo` form: Bun does not resolve a `github:` prefix for
+`bun create`. Either route gives you the same files that `create` generates.
+
+Then configure and start it exactly as in Path B:
+
+```sh
+cd my-api
+cp .env.example .env                                 # DATABASE_URL / REDIS_URL
+docker compose -f deployment/compose.yaml up -d --wait
+bun run cli -- make:crud Product --module products \
+  --fields 'name:text:required,price:numeric:required' --access public
+bun run cli -- db:migrate
+bun run dev
+```
+
+The template carries no demo module, so run `make:crud` (or any `make:*`
+generator) to add your first one. Verified on a clean machine: install,
+`bun run typecheck` and `bun run lint` pass out of the box; migrations and the
+endpoint suite need PostgreSQL from the compose file.
+
 ## What you get
 
 | Surface                                        | Where               | Purpose                                                           |
