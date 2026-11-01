@@ -301,3 +301,41 @@ Registration points (all idempotent, marker-based):
 
 `make:crud` updates all of them; when editing by hand, register in the same
 four places.
+
+### One registration point: `defineModule` and `defineApp`
+
+`@framework/http` can bundle the provider, the routes and the operations into a
+single module that you register in one place:
+
+```ts
+// app/modules/products/index.ts
+export const productsModule = defineModule<AppConfig, Operation>({
+  name: 'products',
+  providers: [productsProvider],
+  routes: { path: '/products', app: productRoutes }, // mounted under the API prefix
+  operations: productOperations,
+});
+
+// bootstrap/app.ts
+export const app = defineApp<AppConfig, Operation>({
+  http: (config) => ({ exposeInternalErrors: config.app.debug, maxBodyBytes: config.http.maxBodyBytes }),
+  providers, // framework and shared infrastructure providers
+  modules: [productsModule],
+  health: { checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] },
+  overrides: (container) => container.override(MAIL_TRANSPORT, () => new SmtpTransport()),
+  routes: (http, application) => http.route('/ws', application.container.resolve(WEBSOCKET_GATEWAY).routes()),
+});
+
+const application = await app.createApplication(config).boot();
+const http = app.createHttp(application); // generateOpenApiDocument({ operations: app.operations, … })
+```
+
+- **Defaults:** module routes mount under `/api/v1` (change it with
+  `apiPrefix`), and `/health` is mounted unless you pass `health: false`.
+- **Failures:** duplicate module names and colliding routes fail at startup.
+- **Overrides:** `overrides` runs before any provider registers, and
+  `container.override` wins regardless of order, so any binding can be
+  replaced, including framework-owned ones.
+- **Typed RPC clients:** routes mounted in the loop don't carry Hono's RPC
+  types into one app-wide `AppType`. Type clients per module instead:
+  `hc<typeof productRoutes>(…)`.
