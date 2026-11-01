@@ -26,6 +26,32 @@ config('no.such.path', 'fallback'); // 'fallback'
 
 Throws `RUNTIME_NOT_BOOTED` when no `Application` was constructed — scripts should load config explicitly with `loadAppConfig()` instead.
 
+#### Typed paths through `Register`
+
+Register the app's config type once, and `config()` and the `CONFIG` token
+become typed everywhere in the app. Paths autocomplete, the return type is
+exact, and an unknown path or a fallback of the wrong type fails to compile:
+
+```ts
+// config/index.ts
+declare module '@framework/core' {
+  interface Register {
+    config: AppConfig;
+  }
+}
+
+config('http.port'); // number
+config('owner', 'system'); // string — the fallback must match the path's type
+config('http.nope'); // compile error
+container.resolve(CONFIG).http.port; // number
+```
+
+Without the augmentation, `config()` accepts any string and returns a
+`JsonValue`. Augment only in an application: augmentation applies to the
+whole TypeScript program, so a package must never declare it.
+`createConfigReader<AppConfig>()` still gives the same typing without
+augmentation, when you prefer an explicit reader.
+
 ### `env(name, fallback?)`
 
 Process-environment lookup. Process env always wins over `.env` files (the framework's documented precedence); an empty string counts as missing:
