@@ -385,7 +385,26 @@ export store are planned.
 
 ## Health
 
-`GET /health/live` never touches dependencies (liveness).
-`GET /health/ready` pings PostgreSQL and returns
-`{ status: 'ready' | 'unavailable', checks: { database: 'ok' | 'failed' } }`
-with 503 when not ready — wire it to your orchestrator's readiness probe.
+`healthRoutes({ checks })` from `@framework/http` serves two routes:
+
+- `GET /live` never touches dependencies (liveness).
+- `GET /ready` runs every probe at once in the request scope and returns
+  `{ status: 'ready' | 'unavailable', checks: { <name>: 'ok' | 'failed' } }`.
+  It answers 503 when any probe throws or exceeds its deadline (2s by
+  default). Error details are never exposed.
+
+```ts
+import { cacheHealthCheck } from '@framework/cache';
+import { databaseHealthCheck } from '@framework/database';
+import { healthRoutes } from '@framework/http';
+import { queueHealthCheck } from '@framework/queue';
+
+http.route('/health', healthRoutes({ checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] }));
+```
+
+For your own dependencies, write a probe with
+`defineHealthCheck('payments', async (resolver) => { await resolver.resolve(PAYMENTS).ping(); }, { timeoutMs: 500 })`.
+
+`runServer({ application, fetch: http.fetch, hostname, port, websocket })`
+serves the kernel. It installs SIGTERM/SIGINT draining, and its `stop()`
+stops the server and then shuts the application down once.

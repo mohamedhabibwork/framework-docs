@@ -67,7 +67,7 @@ docker compose -f deployment/compose.yaml up -d --wait
 ## Health and monitoring
 
 - `GET /health/live` — liveness, no dependencies; restart the container when it fails.
-- `GET /health/ready` — readiness with a database check (503 when not ready); use as the orchestrator's readiness probe.
+- `GET /health/ready` — readiness probing the database, cache and queue (2s deadline each, 503 when any fails); use as the orchestrator's readiness probe.
 - `bun run cli -- queue:status` — queue depth per state; alert on a growing `failed` count.
 - Structured logs carry request/correlation ids; secrets and credentials are redacted before output.
 
