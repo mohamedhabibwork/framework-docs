@@ -140,6 +140,12 @@ export const PAGES: readonly PageMeta[] = [
     description: 'Authorization code with PKCE, client credentials, refresh tokens, introspection and revocation.',
   },
   {
+    slug: 'authorization',
+    source: 'docs/authorization.md',
+    title: 'Authorization',
+    description: 'A deny-by-default gate: roles, permissions and subject-level abilities.',
+  },
+  {
     slug: 'socialite',
     source: 'docs/socialite.md',
     title: 'Social login',

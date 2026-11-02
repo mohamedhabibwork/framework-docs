@@ -195,14 +195,20 @@ export const packages: readonly PackageEntry[] = [
   {
     name: 'observatory',
     id: '@framework/observatory',
-    summary: 'Contracts for in-app request/query/job/event inspection (Telescope equivalent).',
-    status: 'contracts',
+    summary: 'Inspect requests, queries, jobs, events, mail and errors, with secrets masked.',
+    status: 'validated',
+  },
+  {
+    name: 'authorization',
+    id: '@framework/authorization',
+    summary: 'A deny-by-default gate with roles, permissions and abilities.',
+    status: 'validated',
   },
   {
     name: 'socialite',
     id: '@framework/socialite',
-    summary: 'Contracts for OAuth2 social login providers reusing the framework identity model.',
-    status: 'contracts',
+    summary: 'Sign in through Google, GitHub, Apple or your own provider, with account linking.',
+    status: 'validated',
   },
 ];
 

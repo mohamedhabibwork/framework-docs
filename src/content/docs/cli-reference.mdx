@@ -43,6 +43,7 @@ on the text path.
 |            | `observatory:list`    | List recent observatory entries                                                        |
 |            | `observatory:prune`   | Prune observatory entries older than a number of hours                                 |
 |            | `observatory:clear`   | Clear all observatory entries (--confirm required)                                     |
+|            | `permission:sync`     | Make the database roles hold exactly the permissions in config (--confirm required)    |
 | database   | `db:check`            | Validate migration metadata consistency (drizzle-kit check)                            |
 |            | `db:fresh`            | Drop every table in the public schema and re-run all migrations (destructive)          |
 |            | `db:generate`         | Generate a reviewed SQL migration from schema changes (pinned Drizzle Kit)             |
@@ -352,6 +353,8 @@ so CLI indexing refuses it with exit `3` instead of silently doing nothing.
 | `observatory:list [--watcher] [--limit]`   | List recent observatory entries                                              |
 | `observatory:prune [--hours]`              | Prune entries older than a number of hours                                   |
 | `observatory:clear --confirm`              | Clear all observatory entries                                                |
+| `permission:sync --confirm`                | Make the database roles hold exactly the permissions in config               |
+| `make:ability <Name>`                      | Subject-level authorization rule                                             |
 | `storage:check`                            | Validate disk configuration read-only; roots are reported, never created     |
 | `storage:link [--disk <name>] [--force]`   | Symlink the public local disk root into `public/storage` (`--link` moves it) |
 
