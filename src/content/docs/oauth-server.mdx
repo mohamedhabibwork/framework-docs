@@ -160,7 +160,7 @@ API tokens alike.
 
 ## Security notes
 
-- Disabled by default; mounting is an explicit decision in `routes/api.ts`.
+- Disabled by default; mounting is an explicit decision in `bootstrap/app.ts`.
 - Public clients must use PKCE; the server rejects `plain`.
 - Authorization codes are single-use, hashed at rest and expire in 60 seconds.
 - Consent is stored per (client, user) so a second authorization can skip the

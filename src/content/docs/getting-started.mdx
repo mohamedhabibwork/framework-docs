@@ -128,7 +128,7 @@ endpoint suite need PostgreSQL from the compose file.
 
 | Surface                                        | Where               | Purpose                                                           |
 | ---------------------------------------------- | ------------------- | ----------------------------------------------------------------- |
-| `GET /health/live`, `GET /health/ready`        | `routes/health.ts`  | Liveness (no dependencies) and readiness (database, Redis, queue) |
+| `GET /health/live`, `GET /health/ready`        | `bootstrap/app.ts`  | Liveness (no dependencies) and readiness (database, cache, queue) |
 | `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action)  |
 | `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                          |
 | `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation            |

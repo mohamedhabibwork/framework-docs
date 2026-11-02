@@ -68,11 +68,17 @@ database provider, and after the cache provider when you want login throttling
 (see `/cache/`):
 
 ```ts
-// bootstrap/http.ts
-export const http = createHttpKernel(app, { resolveActor: authActorResolver(app) }).route(
-  '/api/v1/auth',
-  authRoutes(config),
-);
+// bootstrap/app.ts (what make:auth writes)
+export const app = defineApp<AppConfig, Operation>({
+  http: (config, application) => ({
+    resolveActor: authActorResolver(application),
+    // …the other kernel options
+  }),
+  providers: [/* … */ authProvider],
+  routes: (http, { config }) => {
+    http.route('/api/v1/auth', authRoutes(config));
+  },
+});
 ```
 
 Finally, add the `auth` section to your config schema. `authConfigSchema`

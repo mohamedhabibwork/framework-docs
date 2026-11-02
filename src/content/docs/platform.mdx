@@ -124,7 +124,7 @@ curl 'localhost:3000/audit/<auditId>'                                   # one en
 Programmatic access: `AuditReader` (`AUDIT_READER` scoped binding) with
 `page(request, filters)` and `findById(id)`. The `/audit` endpoints are
 denied in production until an authorization layer exists (the generated
-`bootstrap/http.ts` shows the extension point).
+`bootstrap/app.ts` shows the extension point).
 
 ## Events & realtime
 
@@ -176,8 +176,8 @@ Generated applications and the playground serve a `WebsocketGateway` at
   is currently subscribed.
 
 ```ts
-// bootstrap/http.ts (generated)
-application.container.resolve(WEBSOCKET_GATEWAY).routes();
+// bootstrap/app.ts (generated): the routes hook mounts the gateway
+http.route('/ws', container.resolve(WEBSOCKET_GATEWAY).routes());
 
 // server-side push from anywhere with a scope
 const gateway = scope.resolve(WEBSOCKET_GATEWAY);
