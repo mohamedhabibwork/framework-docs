@@ -123,7 +123,7 @@ or broken internal links. Versioned lines archive to their own Starlight locale
 
 - Generated CRUD supports a single primary key named `id` (uuid for new tables; uuid/integer/serial for existing tables). Unique/foreign-key fixtures, relations, enums and JSON columns are rejected rather than guessed.
 - Generated resources support `--access public` and (after `make:auth`) `--access authenticated`; per-principal ownership is available as a service-level `ownedBy('userId')` scope but is not a `make:crud` flag, and `make:crud` does not generate `filterable`, `sortable` or `relations`.
-- Import/export covers CSV and JSON (streaming keyset batches, queued, partial-success imports). XLSX/PDF are planned. Export artifacts can live on any storage disk (`DiskExportStore`) or local disk (`LocalExportStore`).
+- Import/export covers CSV, JSON and XLSX (streaming keyset batches to stores with `writeStream`, queued, partial-success imports), and PDF through an app-supplied `PdfRenderer`. Imports are capped at 5 MB, because the content travels in the job payload. Export artifacts can live on any storage disk (`DiskExportStore`) or local disk (`LocalExportStore`).
 - TOTP two-step login provisions the RFC 6238 §5 SHA-256 variant only (`algorithm=SHA256`); authenticator apps without SHA-256 support (notably Google Authenticator) cannot enroll — Aegis, 1Password, Bitwarden, FreeOTP and Ente Auth work. Documented in `packages/auth/src/totp.ts`.
 - TOTP secrets are stored in the `users` table unencrypted (they must be retrievable to verify codes); database-at-rest encryption is a deployment concern.
 - Node is not a selectable runtime; only Bun is validated (the generated Dockerfile pins `oven/bun:1.4.2`). The docs site itself needs Node ≥ 22.23.4 to build.

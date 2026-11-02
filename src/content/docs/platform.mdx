@@ -376,13 +376,13 @@ const exportJob = defineExportJob({
 
 Wire them into a `DataPorter` and mount `importExportRoutes`:
 
-| Endpoint                                   | Purpose                                                      |
-| ------------------------------------------ | ------------------------------------------------------------ |
-| `POST /api/v1/data/import`                 | `{ resource, format: csv\|json, content }` → `202 { jobId }` |
-| `GET  /api/v1/data/import/status/:jobId`   | State, row counts, per-row errors                            |
-| `POST /api/v1/data/export`                 | `{ resource, format: csv\|json }` → `202 { jobId }`          |
-| `GET  /api/v1/data/export/status/:jobId`   | Progress (`export.progress` events on the bus)               |
-| `GET  /api/v1/data/export/download/:jobId` | The finished artifact (streamed attachment)                  |
+| Endpoint                                   | Purpose                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------ |
+| `POST /api/v1/data/import`                 | `{ resource, format: csv\|json\|xlsx, content }` → `202 { jobId }` |
+| `GET  /api/v1/data/import/status/:jobId`   | State, row counts, per-row errors                                  |
+| `POST /api/v1/data/export`                 | `{ resource, format: csv\|json\|xlsx\|pdf }` → `202 { jobId }`     |
+| `GET  /api/v1/data/export/status/:jobId`   | Progress (`export.progress` events on the bus)                     |
+| `GET  /api/v1/data/export/download/:jobId` | The finished artifact, as an attachment                            |
 
 **These endpoints are OpenAPI-documented**: add
 `...dataOperations({ mount: '/api/v1/data', resources: ['products'] })` to
@@ -391,10 +391,35 @@ documented request schemas enumerate the configured resources, so clients see
 exactly what can be imported/exported. The OpenAPI drift check
 (`openapi:check`) fails if the routes and documentation ever diverge.
 
-Imports report partial success (valid rows commit in batches; invalid rows
-are listed with row numbers); exports stream keyset batches into the
-artifact with bounded memory. XLSX/PDF formats and a shared (multi-node)
-export store are planned.
+Imports report partial success: valid rows commit in batches, and invalid rows
+are listed with row numbers.
+
+**Exports** stream keyset batches into the artifact, with bounded memory on a store
+that has `writeStream`. `LocalExportStore` has it, and removes the partial file if
+the export fails. `DiskExportStore` holds the artifact in memory, then writes it.
+
+**XLSX** content on import is base64. Values reach `rowSchema` as strings, as with
+CSV, and dates become ISO timestamps. The first sheet is read and rows with no values
+are skipped, so reported row numbers can run behind the sheet when it has blank rows.
+Uploads are capped at 5 MB, because the content travels in the job payload, and at
+64 MB decompressed. Exported strings are always text, so a value starting with `=`
+never runs as a formula. CSV exports don't have that protection.
+
+**PDF** needs a renderer, because the framework ships none. Without one, asking for
+`pdf` is a 422:
+
+```ts
+defineExportJob({
+  // ...
+  pdf: {
+    async render({ title, columns, rows }) {
+      const document = myPdfLibrary.create(title, columns);
+      for await (const row of rows) document.addRow(row);
+      return document.toBytes(); // or yield chunks from an async generator
+    },
+  },
+});
+```
 
 ## Health
 
