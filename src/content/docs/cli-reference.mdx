@@ -35,84 +35,85 @@ on the text path.
 
 ## Command index
 
-| Group      | Command              | What it does                                                                           |
-| ---------- | -------------------- | -------------------------------------------------------------------------------------- |
-| cache      | `cache:clear`        | Clear the application's cache namespace (--confirm required; --dry-run writes nothing) |
-|            | `session:prune`      | Remove expired sessions (--confirm required; --dry-run only counts them)               |
-| database   | `db:check`           | Validate migration metadata consistency (drizzle-kit check)                            |
-|            | `db:fresh`           | Drop every table in the public schema and re-run all migrations (destructive)          |
-|            | `db:generate`        | Generate a reviewed SQL migration from schema changes (pinned Drizzle Kit)             |
-|            | `db:migrate`         | Apply pending migrations under an advisory lock (explicit release step)                |
-|            | `db:seed`            | Run registered seeders (all, or one by name)                                           |
-|            | `db:status`          | Show applied and pending migrations                                                    |
-| generators | `make:auth`          | Session + personal API token auth: module, registrations, dependency and migration     |
-|            | `make:command`       | Application CLI command registered next to the framework catalog                       |
-|            | `make:controller`    | Typed controller mapping HTTP input to the service                                     |
-|            | `make:crud`          | Complete Drizzle-derived CRUD feature with endpoint tests; --verify runs them          |
-|            | `make:dto`           | Inferred Zod input/output DTO types from the module schemas                            |
-|            | `make:event`         | Typed domain event contract with a validated payload                                   |
-|            | `make:factory`       | Database factory shared by seeders and tests                                           |
-|            | `make:guard`         | Header-credential authentication guard (ActorResolver) for the kernel                  |
-|            | `make:job`           | Versioned, validated job payload and handler, registered in the jobs list              |
-|            | `make:listener`      | Event listener subscribed through the listeners registry                               |
-|            | `make:mail`          | Mailable: typed data → subject/text/HTML (escaped) plus a send helper over the Mailer  |
-|            | `make:middleware`    | Native typed Hono middleware registered as a named alias                               |
-|            | `make:migration`     | Empty custom SQL migration registered in the Drizzle journal                           |
-|            | `make:module`        | Module routes/provider/exports; --crud delegates to make:crud                          |
-|            | `make:notification`  | Notification with explicit channels and one builder per channel                        |
-|            | `make:model`         | Thin model metadata and serialization derived from the Drizzle table                   |
-|            | `make:policy`        | Resource policy for the five CRUD abilities                                            |
-|            | `make:provider`      | Provider lifecycle factory registered in the providers file (bootstrap/app.ts)         |
-|            | `make:repository`    | Typed Drizzle repository composed from CRUD mixins                                     |
-|            | `make:request`       | Form request (schema + authorization hook) for one operation kind                      |
-|            | `make:response`      | Public response projection and serializer                                              |
-|            | `make:schedule`      | Cron schedule dispatching a job or workflow, registered in app/schedules               |
-|            | `make:schema`        | Canonical Drizzle table definition registered in the schema index                      |
-|            | `make:seeder`        | Named seeder registered in the application seeder list                                 |
-|            | `make:service`       | Business service over the repository and DTOs                                          |
-|            | `make:test`          | Test scaffold; --api boots the app through tests/support.ts                            |
-|            | `make:user-provider` | UserProvider implementation (decorates the database provider) for USER_PROVIDER        |
-| openapi    | `openapi:check`      | Validate that documented operations and registered routes match                        |
-|            | `openapi:generate`   | Emit the documented routes' OpenAPI 3.1 specification                                  |
-| project    | `build`              | Compile production binaries with `bun build --compile` into dist/                      |
-|            | `config:check`       | Validate configuration without starting HTTP or workers                                |
-|            | `config:show`        | Show resolved configuration with secrets redacted                                      |
-|            | `create`             | Generate a new application into an empty directory                                     |
-|            | `dev`                | Start the runtime's development watcher                                                |
-|            | `doctor`             | Validate configuration and, with --connections, database connectivity                  |
-|            | `help`               | Show help for a command, or a summary of all commands                                  |
-|            | `list`               | List commands with their group and availability (planned/implemented/validated)        |
-|            | `middleware:list`    | Show registered middleware aliases and groups                                          |
-|            | `module:list`        | Show explicitly registered providers/modules                                           |
-|            | `route:list`         | Show the registered route table                                                        |
-|            | `serve`              | Start the configured HTTP runtime                                                      |
-| queue      | `queue:failed`       | List failed-job records (id, name, attempts, reason)                                   |
-|            | `queue:forget`       | Delete one failed-job record (keeps the queue running)                                 |
-|            | `queue:pause`        | Pause consumption (workers finish in-flight jobs, then idle)                           |
-|            | `queue:prune`        | Remove terminal (failed/completed) records older than --hours                          |
-|            | `queue:resume`       | Resume consumption after queue:pause                                                   |
-|            | `queue:retry`        | Re-queue one failed job (payload and idempotency unchanged)                            |
-|            | `queue:retry-all`    | Re-queue failed jobs oldest-first (bounded by --limit)                                 |
-|            | `queue:status`       | Show job counts per state and adapter health                                           |
-|            | `queue:work`         | Consume configured queues in the foreground (graceful SIGTERM/SIGINT drain)            |
-| scheduler  | `schedule:list`      | Registered timetables with their next due run                                          |
-|            | `schedule:run`       | Fire a schedule immediately (the scheduler process resolves its target)                |
-|            | `schedule:test`      | Alias of schedule:run — execute a schedule now to verify its wiring                    |
-|            | `schedule:work`      | Run the scheduler process: sync timetables, consume due fires (graceful drain)         |
-| search     | `search:flush`       | Flush (truncate) one declared search index                                             |
-|            | `search:index`       | Import declared search indexes from their source tables (derived, rebuildable storage) |
-|            | `search:status`      | Show the configured search driver, its capabilities and declared indexes               |
-| storage    | `storage:check`      | Validate disk configuration (read-only; roots are reported, never created)             |
-|            | `storage:link`       | Link a public local disk root into `public/storage` (idempotent; `--force` re-points)  |
-| tooling    | `format`             | Format sources; --check performs no writes                                             |
-|            | `lint`               | Run configured lint tools; --fix applies safe fixes explicitly                         |
-|            | `test`               | Run the configured test suites (bun test)                                              |
-|            | `typecheck`          | TypeScript checking without emitting files                                             |
-| workflow   | `workflow:cancel`    | Cancel a pending, running or waiting run                                               |
-|            | `workflow:list`      | Paginated workflow runs with status and workflow filters                               |
-|            | `workflow:prune`     | Delete terminal runs older than the retention window                                   |
-|            | `workflow:retry`     | Re-run a failed run from its failure point (or --from a node path)                     |
-|            | `workflow:status`    | One run with its full node tree (pipelines, stages, actions)                           |
+| Group      | Command               | What it does                                                                           |
+| ---------- | --------------------- | -------------------------------------------------------------------------------------- |
+| cache      | `cache:clear`         | Clear the application's cache namespace (--confirm required; --dry-run writes nothing) |
+|            | `session:prune`       | Remove expired sessions (--confirm required; --dry-run only counts them)               |
+|            | `socialite:providers` | List configured social login providers                                                 |
+| database   | `db:check`            | Validate migration metadata consistency (drizzle-kit check)                            |
+|            | `db:fresh`            | Drop every table in the public schema and re-run all migrations (destructive)          |
+|            | `db:generate`         | Generate a reviewed SQL migration from schema changes (pinned Drizzle Kit)             |
+|            | `db:migrate`          | Apply pending migrations under an advisory lock (explicit release step)                |
+|            | `db:seed`             | Run registered seeders (all, or one by name)                                           |
+|            | `db:status`           | Show applied and pending migrations                                                    |
+| generators | `make:auth`           | Session + personal API token auth: module, registrations, dependency and migration     |
+|            | `make:command`        | Application CLI command registered next to the framework catalog                       |
+|            | `make:controller`     | Typed controller mapping HTTP input to the service                                     |
+|            | `make:crud`           | Complete Drizzle-derived CRUD feature with endpoint tests; --verify runs them          |
+|            | `make:dto`            | Inferred Zod input/output DTO types from the module schemas                            |
+|            | `make:event`          | Typed domain event contract with a validated payload                                   |
+|            | `make:factory`        | Database factory shared by seeders and tests                                           |
+|            | `make:guard`          | Header-credential authentication guard (ActorResolver) for the kernel                  |
+|            | `make:job`            | Versioned, validated job payload and handler, registered in the jobs list              |
+|            | `make:listener`       | Event listener subscribed through the listeners registry                               |
+|            | `make:mail`           | Mailable: typed data → subject/text/HTML (escaped) plus a send helper over the Mailer  |
+|            | `make:middleware`     | Native typed Hono middleware registered as a named alias                               |
+|            | `make:migration`      | Empty custom SQL migration registered in the Drizzle journal                           |
+|            | `make:module`         | Module routes/provider/exports; --crud delegates to make:crud                          |
+|            | `make:notification`   | Notification with explicit channels and one builder per channel                        |
+|            | `make:model`          | Thin model metadata and serialization derived from the Drizzle table                   |
+|            | `make:policy`         | Resource policy for the five CRUD abilities                                            |
+|            | `make:provider`       | Provider lifecycle factory registered in the providers file (bootstrap/app.ts)         |
+|            | `make:repository`     | Typed Drizzle repository composed from CRUD mixins                                     |
+|            | `make:request`        | Form request (schema + authorization hook) for one operation kind                      |
+|            | `make:response`       | Public response projection and serializer                                              |
+|            | `make:schedule`       | Cron schedule dispatching a job or workflow, registered in app/schedules               |
+|            | `make:schema`         | Canonical Drizzle table definition registered in the schema index                      |
+|            | `make:seeder`         | Named seeder registered in the application seeder list                                 |
+|            | `make:service`        | Business service over the repository and DTOs                                          |
+|            | `make:test`           | Test scaffold; --api boots the app through tests/support.ts                            |
+|            | `make:user-provider`  | UserProvider implementation (decorates the database provider) for USER_PROVIDER        |
+| openapi    | `openapi:check`       | Validate that documented operations and registered routes match                        |
+|            | `openapi:generate`    | Emit the documented routes' OpenAPI 3.1 specification                                  |
+| project    | `build`               | Compile production binaries with `bun build --compile` into dist/                      |
+|            | `config:check`        | Validate configuration without starting HTTP or workers                                |
+|            | `config:show`         | Show resolved configuration with secrets redacted                                      |
+|            | `create`              | Generate a new application into an empty directory                                     |
+|            | `dev`                 | Start the runtime's development watcher                                                |
+|            | `doctor`              | Validate configuration and, with --connections, database connectivity                  |
+|            | `help`                | Show help for a command, or a summary of all commands                                  |
+|            | `list`                | List commands with their group and availability (planned/implemented/validated)        |
+|            | `middleware:list`     | Show registered middleware aliases and groups                                          |
+|            | `module:list`         | Show explicitly registered providers/modules                                           |
+|            | `route:list`          | Show the registered route table                                                        |
+|            | `serve`               | Start the configured HTTP runtime                                                      |
+| queue      | `queue:failed`        | List failed-job records (id, name, attempts, reason)                                   |
+|            | `queue:forget`        | Delete one failed-job record (keeps the queue running)                                 |
+|            | `queue:pause`         | Pause consumption (workers finish in-flight jobs, then idle)                           |
+|            | `queue:prune`         | Remove terminal (failed/completed) records older than --hours                          |
+|            | `queue:resume`        | Resume consumption after queue:pause                                                   |
+|            | `queue:retry`         | Re-queue one failed job (payload and idempotency unchanged)                            |
+|            | `queue:retry-all`     | Re-queue failed jobs oldest-first (bounded by --limit)                                 |
+|            | `queue:status`        | Show job counts per state and adapter health                                           |
+|            | `queue:work`          | Consume configured queues in the foreground (graceful SIGTERM/SIGINT drain)            |
+| scheduler  | `schedule:list`       | Registered timetables with their next due run                                          |
+|            | `schedule:run`        | Fire a schedule immediately (the scheduler process resolves its target)                |
+|            | `schedule:test`       | Alias of schedule:run — execute a schedule now to verify its wiring                    |
+|            | `schedule:work`       | Run the scheduler process: sync timetables, consume due fires (graceful drain)         |
+| search     | `search:flush`        | Flush (truncate) one declared search index                                             |
+|            | `search:index`        | Import declared search indexes from their source tables (derived, rebuildable storage) |
+|            | `search:status`       | Show the configured search driver, its capabilities and declared indexes               |
+| storage    | `storage:check`       | Validate disk configuration (read-only; roots are reported, never created)             |
+|            | `storage:link`        | Link a public local disk root into `public/storage` (idempotent; `--force` re-points)  |
+| tooling    | `format`              | Format sources; --check performs no writes                                             |
+|            | `lint`                | Run configured lint tools; --fix applies safe fixes explicitly                         |
+|            | `test`                | Run the configured test suites (bun test)                                              |
+|            | `typecheck`           | TypeScript checking without emitting files                                             |
+| workflow   | `workflow:cancel`     | Cancel a pending, running or waiting run                                               |
+|            | `workflow:list`       | Paginated workflow runs with status and workflow filters                               |
+|            | `workflow:prune`      | Delete terminal runs older than the retention window                                   |
+|            | `workflow:retry`      | Re-run a failed run from its failure point (or --from a node path)                     |
+|            | `workflow:status`     | One run with its full node tree (pipelines, stages, actions)                           |
 
 _Generated from `bun run cli -- list`; run it for the live catalog._
 
@@ -344,6 +345,7 @@ so CLI indexing refuses it with exit `3` instead of silently doing nothing.
 | ------------------------------------------ | ---------------------------------------------------------------------------- |
 | `cache:clear [--store <name>] [--confirm]` | Clear the cache namespace (`--dry-run` previews; `--confirm` required)       |
 | `session:prune [--confirm]`                | Remove expired sessions (`--dry-run` only counts them)                       |
+| `socialite:providers`                      | List configured social login providers, without their secrets                |
 | `storage:check`                            | Validate disk configuration read-only; roots are reported, never created     |
 | `storage:link [--disk <name>] [--force]`   | Symlink the public local disk root into `public/storage` (`--link` moves it) |
 
@@ -380,7 +382,6 @@ and exits with code `3` when invoked:
 | `cache:prune`, `storage:prune`                                   | Adapter-specific cleanup that no shipped driver needs yet                                                   |
 | `oauth:client:create`, `oauth:client:list`, `oauth:key:generate` | Client registration and key generation are code/API-level today ([OAuth server](/oauth-server/))            |
 | `observatory:*`                                                  | The package ships contracts only ([Packages](/packages/))                                                   |
-| `socialite:providers`                                            | The package ships contracts only ([Packages](/packages/))                                                   |
 
 See [Implementation status](/status/) for the evidence behind each delivered
 command.

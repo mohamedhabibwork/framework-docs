@@ -48,6 +48,7 @@ const features: SidebarItem[] = [
   { label: 'Workflows', slug: 'workflows' },
   { label: 'Scheduling', slug: 'scheduling' },
   { label: 'OAuth server', slug: 'oauth-server' },
+  { label: 'Social login', slug: 'socialite' },
 ];
 
 const operations: SidebarItem[] = [
