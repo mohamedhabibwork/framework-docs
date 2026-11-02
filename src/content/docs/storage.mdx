@@ -276,6 +276,28 @@ disks: {
 },
 ```
 
+`s3`, `r2` and `minio` are tested on every run against a real MinIO server, across
+reads, writes, streaming, listing, copy, move, delete, prefixes and signed URLs.
+`bun run db:up` starts it. Their options look like this:
+
+```ts
+// AWS S3: credentials default to the AWS SDK's own chain.
+{ driver: 's3', options: { bucket, region: 'eu-central-1' } }
+
+// Any S3-compatible server: name the endpoint and use path-style URLs.
+{ driver: 's3', options: { bucket, region: 'us-east-1', endpoint, forcePathStyle: true, credentials } }
+
+// Cloudflare R2: the same peer SDKs as s3.
+{ driver: 'r2', options: { bucket, accountId, credentials } }
+
+// MinIO through its own client (install `minio`); or use s3 with an endpoint.
+{ driver: 'minio', options: { bucket, endPoint: 'minio.internal', port: 9000, useSSL: true, accessKey, secretKey } }
+```
+
+`s3` and `r2` need `@aws-sdk/client-s3`, `@aws-sdk/lib-storage` and
+`@aws-sdk/s3-request-presigner`. The tests run the `r2` driver against MinIO, not
+Cloudflare, so try it once against a real R2 bucket.
+
 Boot creates every configured disk eagerly, so a missing peer SDK or invalid
 kit options fail startup with `STORAGE_DRIVER_UNAVAILABLE` instead of failing
 on the first file operation.
