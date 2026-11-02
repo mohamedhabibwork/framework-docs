@@ -191,6 +191,7 @@ an endpoint test suite — then registers everything through explicit markers.
 | `--route <path>`                  | Mount path (default `/api/v1/<module>`)                                                                                   |
 | `--access public\|authenticated`  | `public` mounts without auth; `authenticated` requires `make:auth` and maps CRUD abilities to token abilities             |
 | `--soft-delete`                   | Adds `deletedAt`, restore behavior and deletion tests                                                                     |
+| `--compact`                       | One `defineResource` call plus `schemas.ts`, instead of every layer                                                       |
 | `--verify`                        | Typecheck + run the endpoint suite on an isolated PostgreSQL database                                                     |
 | `--test-mode in-process\|network` | Endpoint transport for verification (default in-process)                                                                  |
 | `--dry-run`                       | Preview every file change and the test plan; write nothing                                                                |

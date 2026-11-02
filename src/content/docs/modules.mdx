@@ -382,6 +382,19 @@ Every part can change:
   `class extends ResourceService` keeps its hooks.
 - **One binding:** `container.override(notes.tokens.service, …)`.
 
+`make:crud Note --fields 'body:text:required' --access public --compact` generates
+this call with `schemas.ts`, which keeps the column refinements and an explicit
+response allowlist. It runs the same endpoint suite as the default expanded
+layout, which generates every layer as files you edit. Generators such as
+`make:service` extend an expanded module.
+
+`make:crud` finds route collisions by reading source text, so write `path`
+explicitly on a hand-written `defineResource`. Without it, a duplicate is caught
+when the app starts rather than at generation.
+
+For `access: 'authenticated'`, callers need `<abilityPrefix>.<ability>`, such as
+`notes.view`. Sessions hold `*`; API tokens carry only what they were issued.
+
 ### The standard stack: `apiPreset`
 
 `@framework/presets` installs what a typical API needs: database, cache, queue,
