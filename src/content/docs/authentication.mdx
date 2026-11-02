@@ -213,23 +213,74 @@ only `sha256(token)` as `token_hash`. Expiry is filtered in SQL
   `countExpired()` reports them without deleting, and `revokeAllForUser()` is
   the "log me out everywhere" switch.
 
-### Swapping the user provider
+### Adding columns to users
 
-The `UserProvider` contract is three methods — `findById`, `findByEmail` and
-`create` (which must persist the already-hashed password). Applications with a
-custom user store implement it and hand it to the `AuthService` directly; any
-implementation satisfying the contract works:
+Declare your own `users` table over `authUserColumns()`, export it from your
+schema instead of the framework's, and hand it to the provider. Declaring it on
+`Register` once types `AUTH_SERVICE`, `USER_PROVIDER`, `authPrincipal(c)` and
+`c.var.principal.user` across the app:
 
 ```ts
-const service = new AuthService({
-  hasher: new BunPasswordHasher(),
-  users: myCustomUserProvider,
-  sessions: new PgSessionStore(connection),
-  tokens: new PgTokenStore(connection),
-  sessionTtlSeconds: config.auth.session.ttlSeconds,
-  tokenTtlSeconds: config.auth.token.ttlSeconds,
+import { authUserColumns, createAuthProvider } from '@framework/auth';
+
+export const users = pgTable('users', {
+  ...authUserColumns(),
+  plan: text('plan').notNull().default('free'),
 });
+
+declare module '@framework/core' {
+  interface Register {
+    user: typeof users.$inferSelect;
+  }
+}
+
+createAuthProvider({ usersTable: users });
 ```
+
+- **The table must be named `users`.** The `sessions`, `api_tokens` and other
+  auth tables have foreign keys pointing there, so any other name fails at boot.
+- **New columns need a default or a nullable type,** because the default
+  provider's `create` only writes `name`, `email` and `passwordHash`. Otherwise,
+  pass your own `userProvider`.
+- **Extra columns stay private.** The auth routes' `publicUser` picks its fields
+  explicitly, so a column you add never reaches a response on its own.
+
+Without `Register`, pass the type where you need it instead:
+`createAuthProvider<AppConfig, AppUser>(…)` and `authPrincipal<AppUser>(c)`.
+
+### Replacing auth parts
+
+`createAuthProvider` takes `userProvider`, `hasher` and `stores: { sessions,
+tokens }`. Any other binding can be replaced with `container.override`.
+`UserProvider` also covers password updates, email verification and the TOTP
+secret, so a custom store implements all of its methods. The default stores join
+`usersTable`, so a user store outside PostgreSQL also replaces them.
+
+### Custom guards
+
+Name a guard, implement it, and list it in `auth.guards` in the position it
+should run. A guard resolves a `Principal`, or null to pass to the next one:
+
+```ts
+declare module '@framework/core' {
+  interface Register {
+    guards: 'partner-api';
+  }
+}
+
+const partnerApi: AuthGuard = async (c) => {
+  const partner = await findPartner(c.req.header('x-partner-key'));
+  return partner ? { id: partner.userId, via: 'partner-api', abilities: partner.abilities, user: partner.user } : null;
+};
+
+createAuthProvider({ guards: { 'partner-api': partnerApi } });
+
+// config: keeps guard names validated when the config loads
+auth: authConfigSchema.extend({ guards: authGuardsSchema('partner-api') }),
+```
+
+A name in `auth.guards` with no implementation fails boot. A custom guard with a
+built-in's name replaces that guard.
 
 ### Password hashing
 
