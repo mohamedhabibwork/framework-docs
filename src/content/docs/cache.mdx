@@ -171,6 +171,12 @@ fail-open vs fail-closed — security callers must fail closed:
 | `CACHE_UNSUPPORTED_OPERATION`  | The engine does not implement the operation              |
 | `CACHE_CONFIG_INVALID`         | Invalid provider configuration                           |
 
+When Redis is unreachable, commands reject with `CACHE_UNAVAILABLE` instead of
+queueing until it returns: after a few quick reconnect attempts on a refused
+connection, or after a 2-second timeout on a host that never answers. The next
+command opens a new connection, so the driver recovers on its own once Redis is
+back. Nothing is retried for the caller.
+
 ## Advanced
 
 ### Capabilities

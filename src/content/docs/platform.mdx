@@ -401,6 +401,11 @@ import { queueHealthCheck } from '@framework/queue';
 http.route('/health', healthRoutes({ checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] }));
 ```
 
+Mount these ahead of middleware with dependencies, as `defineApp` does, so a Redis
+outage cannot fail a probe through the throttle. They are therefore not rate
+limited, and `/health/ready` runs its probes on every request, so keep it off the
+public internet.
+
 For your own dependencies, write a probe with
 `defineHealthCheck('payments', async (resolver) => { await resolver.resolve(PAYMENTS).ping(); }, { timeoutMs: 500 })`.
 

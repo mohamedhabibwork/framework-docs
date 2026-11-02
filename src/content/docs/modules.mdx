@@ -338,8 +338,9 @@ const http = app.createHttp(application); // generateOpenApiDocument({ operation
 
 - **Defaults:** module routes mount under `/api/v1` (change it with
   `apiPrefix`), and `/health` is mounted unless you pass `health: false`.
-- **Order:** kernel, then `middleware` (e.g. the `api` throttle group), then
-  `/health`, the modules and the `routes` hook, so middleware wraps all of them.
+- **Order:** kernel, then `/health`, then `middleware` (e.g. the `api` throttle
+  group), then the modules and the `routes` hook, so middleware wraps everything
+  except the health probes.
   The `http` callback also receives the application, for options such as
   `resolveActor`.
 - **Failures:** duplicate module names and colliding routes fail at startup.
