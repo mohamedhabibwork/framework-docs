@@ -1,0 +1,98 @@
+---
+title: 'Observatory'
+description: 'Inspect requests, queries, jobs, events, mail and errors, with secrets masked.'
+---
+
+`@framework/observatory` records what your application did, so you can inspect it
+without adding logging: requests, queries, jobs, events, mail and server errors. It's
+for development and short-term debugging. It stores entries in your own database and
+exports nothing, which makes it separate from the OpenTelemetry work on the roadmap.
+
+**It's off unless you turn it on,** and while off it binds a no-op and touches nothing.
+
+## Setup
+
+Export the table from your schema so Drizzle Kit generates its migration:
+
+```ts
+export { observatoryEntries } from '@framework/observatory';
+```
+
+Then add the config section, the provider, the middleware and the routes:
+
+```ts
+// config: validate with observatoryConfigSchema
+observatory: { enabled: true, driver: 'postgres', retentionHours: 24, mailSubjects: false },
+
+// providers
+createObservatoryProvider<AppConfig>(),
+
+// http, before your routes
+http.use(observatoryMiddleware());
+http.route('/observatory', observatoryRoutes({ authorize: requireAbility('observatory.view') }));
+
+// workers
+runWorker({ /* ... */ onSettled: jobWatcher(application.container.resolve(OBSERVATORY)) });
+```
+
+`driver: 'memory'` keeps the last 1,000 entries in the process instead. Each process
+then has its own, and the CLI can't see them.
+
+## What it records
+
+| Watcher     | Kept                                                                    | Left out                                                                                    |
+| ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `request`   | Method, route pattern, status, duration, number of query parameters     | Paths, query strings, headers, bodies                                                       |
+| `exception` | Server errors only: name, the message's first line, stack frames, route | Expected 4xx responses, and the rest of the message, which can hold a failed query's values |
+| `query`     | Statement text from `db`                                                | Parameter values, and any timing                                                            |
+| `job`       | Name, attempt, duration, the error message's first line                 | Payloads                                                                                    |
+| `mail`      | Message and recipient counts. Subjects if `mailSubjects` is on          | Addresses and bodies                                                                        |
+| `event`     | Type, channel, payload                                                  | Fields with secret-looking names                                                            |
+
+Every entry also passes through a mask: keys that look secret (`password`, `token`,
+`apiKey` and so on) and credentials in URLs are replaced, and anything over 16 KB is
+cut down to a `{ truncated: true }` note. This catches common cases and can't catch
+everything, because a secret under an ordinary key looks like any other value:
+
+- **Event payloads are stored,** so one carrying personal data stores personal data.
+- **The first line of an error message is stored,** after masking only URL credentials, so
+  one you write with a value in it stores that value.
+- **Queries built with `sql.raw`** can hold literal values in their text.
+
+Treat the table as sensitive, and keep retention short.
+
+## Reading it
+
+| Route                                         | Purpose               |
+| --------------------------------------------- | --------------------- |
+| `GET /entries?watcher=&status=&since=&limit=` | Newest first, 500 max |
+| `GET /entries/:id`                            | One entry             |
+
+`authorize` is required and can't be `'public'`. While the observatory is off, both
+routes are a 404. From the command line:
+
+```bash
+bun run cli -- observatory:list --watcher job --limit 20
+```
+
+## Pruning
+
+Each process removes entries older than `retentionHours` about once an hour, while it's
+recording. You can also run `observatory:prune --hours 24`, and
+`observatory:clear --confirm` removes everything.
+
+## What it costs
+
+Recording never fails the work it watches. Writes run in the background, a failed one is
+dropped, and past 100 pending writes new entries are dropped too, so an entry can be
+missing. At shutdown it waits at most 5 seconds for pending writes.
+
+On `postgres`, each query watched adds a write, and on the shared pool those writes queue
+alongside your own queries. Give the store its own small pool with
+`createObservatoryProvider({ connection: OBSERVATORY_CONNECTION })`, and expect this to be
+a poor fit for sustained production traffic.
+
+Only queries through `connection.db` are seen. Raw `connection.sql` calls aren't.
+
+The `cache` watcher name is reserved for your own `observatory.recordNow` calls. Nothing
+records it automatically yet.

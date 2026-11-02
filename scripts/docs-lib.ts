@@ -146,6 +146,12 @@ export const PAGES: readonly PageMeta[] = [
     description: 'Sign in through Google, GitHub, Apple or your own provider, with account linking.',
   },
   {
+    slug: 'observatory',
+    source: 'docs/observatory.md',
+    title: 'Observatory',
+    description: 'Inspect requests, queries, jobs, events, mail and errors, with secrets masked.',
+  },
+  {
     slug: 'testing',
     source: 'docs/testing.md',
     title: 'Testing',
