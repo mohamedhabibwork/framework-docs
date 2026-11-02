@@ -99,6 +99,30 @@ not model (`failParentOnFailure`, `stackTraceLimit`, `removeOnComplete`,
 `backoff`, …). It is merged last, so it wins over both the definition and the
 queue defaults.
 
+### By name
+
+Give the queue its jobs and it can dispatch by name. Declaring the same list on
+`Register` makes a wrong name or payload fail to compile. Keep the list `as const`
+so the names stay literal:
+
+```ts
+export const jobs = [sendInvoice, resizeImage] as const;
+
+declare module '@framework/core' {
+  interface Register {
+    jobs: typeof jobs;
+  }
+}
+
+apiPreset<AppConfig>({ jobs, notifications: false });
+
+await queue.dispatch('send-invoice', { invoiceId }, execution());
+```
+
+Without `Register`, names are plain strings and only the runtime checks apply: an
+unknown name throws `JOB_UNKNOWN`, and an invalid payload throws
+`JOB_PAYLOAD_INVALID`. Passing a definition works as before and needs no list.
+
 ### Queue options
 
 `QueueManager` forwards its configuration to BullMQ, so the connection and the

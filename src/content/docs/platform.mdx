@@ -145,7 +145,21 @@ Subscribe in code:
 await bus.subscribe('products', (event) => console.log(event.type, event.payload));
 ```
 
-Or push to browsers via the generated `GET /ws` endpoint (protocol):
+Declaring your events on `Register` checks `createDomainEvent` payloads and types
+those handlers. Events you don't list, such as the entity events above, stay open:
+
+```ts
+type AppEvents = { 'orders.created': { readonly orderId: string } };
+
+declare module '@framework/core' {
+  interface Register {
+    events: AppEvents;
+  }
+}
+```
+
+Use a `type` alias rather than an `interface`, because only aliases count as JSON
+values. Or push to browsers via the generated `GET /ws` endpoint (protocol):
 
 ```json
 → {"action":"subscribe","channel":"products"}

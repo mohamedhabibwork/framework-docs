@@ -234,6 +234,52 @@ Custom NotifyKit drivers registered by the application are accepted for either
 channel when they declare a `target` key (the recipient field their string `to`
 is delivered as).
 
+## Custom channels
+
+`defineChannel` adds a delivery channel beyond the built-in four. Pass it to the
+provider, then list its name on a notification with a builder under `content`:
+
+```ts
+const whatsapp = defineChannel({
+  name: 'whatsapp',
+  content: z.object({ text: z.string().min(1) }),
+  deliver: async (to, content) => ({ reference: await client.send(to, content.text) }),
+});
+
+const welcome = defineNotification({
+  name: 'welcome',
+  channels: ['email', 'whatsapp'],
+  payload: z.object({ userName: z.string() }),
+  toEmail: ({ userName }) => ({ subject: `Hi ${userName}`, text: 'Welcome' }),
+  content: { whatsapp: ({ userName }) => ({ text: `Hi ${userName}` }) },
+});
+
+createNotificationsProvider({ definitions: [welcome], channels: [whatsapp] });
+```
+
+A custom channel gets the same record, per-channel status and queued retries as
+the built-in ones. A failed `deliver` is recorded and doesn't block other
+channels. **Register the channel on workers too:** a queued job naming a channel
+its process doesn't have fails and retries rather than counting as delivered.
+
+## Typed names
+
+Declaring your lists on `Register` checks `send` and `sendQueued` at compile time.
+Keep the list `as const` so the names stay literal:
+
+```ts
+export const notifications = [welcome] as const;
+
+declare module '@framework/core' {
+  interface Register {
+    notifications: typeof notifications;
+    channels: 'whatsapp';
+  }
+}
+
+await service.send({ name: 'welcome', channels: ['email'], to, payload: { userName } });
+```
+
 ## Testing
 
 Use `InMemoryNotificationStore` — the documented fake — and assert on exactly
