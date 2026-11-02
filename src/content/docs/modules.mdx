@@ -382,6 +382,55 @@ Every part can change:
   `class extends ResourceService` keeps its hooks.
 - **One binding:** `container.override(notes.tokens.service, …)`.
 
+**Filtering, sorting and relations** are allowlists you name per resource. Anything
+else in the query string is a 422:
+
+```ts
+export const articles = defineResource(articlesTable, {
+  access: 'public',
+  hidden: ['secret'],
+  filterable: { status: true, views: ['gte', 'lte'], title: ['contains'] },
+  sortable: ['views', 'title'],
+  relations: {
+    author: belongsTo(authors, { columns: ['id', 'name'] }),
+    comments: hasMany(comments, { columns: ['id', 'body'], limit: 20 }),
+  },
+  columns: { meta: z.object({ tags: z.array(z.string()) }) },
+});
+```
+
+```text
+GET /articles?filter[status][eq]=published&filter[views][gte]=10&sort=-views,title&include=author,comments
+```
+
+- **Operators:** `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in` (comma-separated) and
+  `contains` (case-insensitive, text only). `true` allows what suits the column's
+  type. Each value is validated against its column, so a bad one is a 422 rather
+  than a database error.
+- **Hidden columns** can't be filtered or sorted, because comparisons would reveal
+  their values. Listing one fails when the resource is defined.
+- **Relations** find their foreign key on their own; pass `foreignKey` when several
+  connect the tables. `columns` is required, so a related table's other columns
+  stay private. Each relation runs one query however many rows are listed, skips
+  soft-deleted rows and returns `null` or `[]` when there's nothing to include.
+- **Included rows skip the related table's policy and `ownedBy`.** Clients can
+  often write a foreign key, so a caller could point one at someone else's row and
+  read it through `?include=`. List only columns any caller may see, or scope the
+  relation with `where: ({ execution }) => eq(categories.ownerId, execution.actor.id)`.
+- **`hasMany` limits** cap what's returned, 100 rows per parent unless you set
+  `limit`. They don't cap the work: the query still ranks every child of the listed
+  parents, so index the foreign key and keep very large child tables out of
+  `relations`.
+- **`pgEnum` columns** become `z.enum` by themselves. `columns` replaces a column's
+  schema, typically the shape of a `jsonb` column, and optionality still follows
+  the table.
+- **OpenAPI and the RPC client** see every filter, `sort`, `include` and included
+  row.
+
+These generate the list query, so they can't be combined with `schemas.query`.
+Hand-written modules get the same query from `defineListQuery(table, { filterable,
+sortable })`, which returns its `schema` and `toOptions(parsedQuery)`.
+
 `make:crud Note --fields 'body:text:required' --access public --compact` generates
 this call with `schemas.ts`, which keeps the column refinements and an explicit
 response allowlist. It runs the same endpoint suite as the default expanded
