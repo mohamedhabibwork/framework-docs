@@ -10,8 +10,8 @@ What it is, how to wire it, and how to deliver across channels.
 `push`/`messaging` via NotifyKit providers. Every send validates an envelope,
 persists one record, and fans out per channel — recording a delivered or failed
 status per channel as it goes. A failure in one channel never blocks the
-others. SMS is planned but deliberately not implemented: the envelope schema
-rejects any channel outside the four above until an SMS dependency is chosen.
+others. SMS is a [custom channel](#sms) you register, and the envelope schema
+rejects any channel that isn't registered.
 
 > **Choosing between Mail and Notifications** — use [Mail](/mail/) when you need
 > a direct email transport: build a message, hand it to a transport, done. Use
@@ -261,6 +261,31 @@ A custom channel gets the same record, per-channel status and queued retries as
 the built-in ones. A failed `deliver` is recorded and doesn't block other
 channels. **Register the channel on workers too:** a queued job naming a channel
 its process doesn't have fails and retries rather than counting as delivered.
+
+## SMS
+
+`smsChannel` is a custom channel over an `SmsTransport`. `twilioSms` and `vonageSms`
+call each provider's API directly, so no SDK is needed:
+
+```ts
+const sms = smsChannel(
+  twilioSms({ accountSid, authToken, from: '+15550199' }),
+  // or vonageSms({ apiKey, apiSecret, from: 'Acme' }), or your own SmsTransport
+);
+
+const loginCode = defineNotification({
+  name: 'login-code',
+  channels: ['sms'],
+  payload: z.object({ code: z.string() }),
+  content: { sms: ({ code }) => ({ body: `Your code is ${code}` }) },
+});
+
+createNotificationsProvider({ definitions: [loginCode], channels: [sms] });
+```
+
+Declare `channels: 'sms'` on `Register` so `'sms'` type-checks. Recipients must be
+E.164 numbers such as `+15550100`, and another format is recorded as a failed
+delivery. In tests, use `MemorySmsTransport` and read its `sent` list.
 
 ## Typed names
 

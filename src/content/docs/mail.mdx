@@ -192,11 +192,27 @@ this same `Mailer`, so the email transport stays owned here.
 
 ## SMTP
 
-The SMTP transport is planned but deliberately not implemented: an SMTP
-dependency has to be chosen first so real-transport integration tests can prove
-delivery behavior. Until then the drivers are `console` | `memory`, and
-`mailConfigSchema` rejects anything else — an invalid driver is a configuration
-error, not a silent fallback.
+Set `MAIL_DRIVER=smtp` and the connection settings:
+
+| Variable                        | Default | Meaning                                         |
+| ------------------------------- | ------- | ----------------------------------------------- |
+| `MAIL_SMTP_HOST`                | none    | Required by the driver; boot fails without it   |
+| `MAIL_SMTP_PORT`                | `587`   | Usually 587 with STARTTLS, or 465 with `SECURE` |
+| `MAIL_SMTP_SECURE`              | `false` | TLS from the first byte instead of STARTTLS     |
+| `MAIL_SMTP_REQUIRE_TLS`         | `true`  | Refuse a server that doesn't offer STARTTLS     |
+| `MAIL_SMTP_REJECT_UNAUTHORIZED` | `true`  | Verify the server's certificate                 |
+| `MAIL_SMTP_USER`                | none    | Username; set with the password to authenticate |
+| `MAIL_SMTP_PASSWORD`            | none    | Redacted by `config:show`                       |
+| `MAIL_SMTP_TIMEOUT_MS`          | `10000` | Connection, greeting and socket timeouts        |
+
+Your config picks these up with `smtp: smtpConfigSection()` in the `mail` section,
+which generated apps already have. For a local catcher such as Mailpit, set
+`MAIL_SMTP_REQUIRE_TLS=false`.
+
+`Mailer.send` waits for the SMTP server, so a slow server slows the request. Send
+from a job or use the [Notifications](/notifications/) package's `sendQueued` in
+request handlers. A delivery failure throws `MAIL_TRANSPORT_FAILED`, and
+`accepted` on the result lists only the recipients the server took.
 
 ## Testing
 
