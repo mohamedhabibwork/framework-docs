@@ -289,14 +289,13 @@ const status = await manager.status(runId); // run + full node tree
 await manager.cancel(runId); // or retry(runId, { fromNode }), resume(runId), prune(days)
 ```
 
-**Workers**: merge the engine's internal jobs into the regular `JobWorker` —
-one process, one queue:
+**Workers**: add the engine to `runWorker`, which merges its internal jobs into
+the regular consumer — one process, one queue:
 
 ```ts
 const engine = new WorkflowEngine(application, manager, queue, bus);
-const worker = new JobWorker(queue, application, [...jobs, ...engine.jobs], { concurrency: 4 });
-worker.start();
-engine.start(); // wait-for-event bridge + timeout sweep
+runWorker({ application, queue, jobs, extensions: [engine], concurrency: 4 });
+// The engine also runs the wait-for-event bridge and timeout sweep.
 ```
 
 Actions marked `via: 'queue'` and queued stages execute as their own BullMQ

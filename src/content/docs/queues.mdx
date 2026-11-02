@@ -56,17 +56,20 @@ export const jobs: JobList = [productImportJob, productExportJob];
 The worker is its own process — `bin/worker.ts` in generated apps:
 
 ```ts
-const queue = new QueueManager({ url: config.redis.url, prefix: config.queue.prefix, queue: config.queue.name });
-const worker = new JobWorker(queue, application, jobs, {
+runWorker({
+  application,
+  queue: new QueueManager({ url: config.redis.url, prefix: config.queue.prefix, queue: config.queue.name }),
+  jobs,
   concurrency: config.queue.concurrency,
-  onFailed: (job, error) => console.error(`job ${job.name} (${job.id ?? '?'}) failed`, error),
+  shutdownTimeoutMs: config.http.shutdownTimeoutMs,
 });
-worker.start();
 ```
 
 Run it with `bun run worker` or `bun run cli -- queue:work`. Workers drain
 gracefully on SIGTERM/SIGINT: they stop taking new jobs and wait for active
-ones within your shutdown deadline.
+ones within your shutdown deadline. `runWorker` logs failed jobs by default; pass
+`onFailed` to report them elsewhere. Use `JobWorker` directly to manage the
+lifecycle yourself.
 
 ## Dispatching
 

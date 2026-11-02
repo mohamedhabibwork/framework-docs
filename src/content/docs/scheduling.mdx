@@ -46,17 +46,20 @@ const queue = new QueueManager({
   prefix: config.queue.prefix,
   queue: `${config.queue.name}-schedules`,
 });
-const scheduler = new Scheduler(queue, {
+await runScheduler({
+  application,
+  queue,
+  schedules,
   dispatchWorkflow: (name, input, execution) =>
     application.container.resolve(WORKFLOW_MANAGER).dispatch(name, input, execution),
 });
-await scheduler.sync(schedules);
-
-const worker = new JobWorker(queue, application, [scheduler.fireJob(schedules)]);
-worker.start();
 ```
 
-`sync` is idempotent — it creates or updates each BullMQ job scheduler, so
+`runScheduler` syncs the timetables, consumes their fires and drains on
+SIGTERM/SIGINT. Use `Scheduler` and `JobWorker` directly to manage the lifecycle
+yourself.
+
+Syncing is idempotent — it creates or updates each BullMQ job scheduler, so
 redeploying with a changed cron expression simply re-registers the timetable.
 
 ## Dispatch targets
