@@ -297,8 +297,9 @@ Registration points (all idempotent, marker-based):
 | Module        | `bootstrap/app.ts`         | `// @framework:modules`        |
 
 The module's `index.ts` exports a `defineModule` bundle (provider, routes,
-operations), so `make:crud` adds one line to `bootstrap/app.ts`. When editing
-by hand, register in the same two places.
+operations), so `make:crud` adds one line to `bootstrap/app.ts`. It refuses a
+route already mounted by another module or in that file. When editing by hand,
+register in the same two places.
 
 Apps created before `defineApp` keep the older layout: with no `paths.app` in
 `bin/cli.ts`, `make:crud` registers the provider in `bootstrap/providers.ts`
