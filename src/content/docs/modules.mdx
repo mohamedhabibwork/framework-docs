@@ -351,6 +351,37 @@ const http = app.createHttp(application); // generateOpenApiDocument({ operation
   types into one app-wide `AppType`. Type clients per module instead:
   `hc<typeof productRoutes>(…)`.
 
+### One call: `defineResource`
+
+`defineResource` from `@framework/crud` turns a table into a full CRUD module:
+repository, service, controller, routes, policy and OpenAPI operations.
+
+```ts
+export const notes = defineResource(notesTable, {
+  access: 'authenticated', // or 'public', or your own ResourcePolicy
+  ownedBy: 'authorId', // scopes every operation to the acting user
+  hidden: ['internalRef'], // out of responses and of what clients may write
+});
+
+// defineApp({ modules: [notes] })
+const client = hc<typeof notes.routes.app>('/api/v1/notes'); // fully typed
+```
+
+It mounts list, show, create, update and delete. Tables with a `deletedAt` column
+also get `/deleted`, `/deleted/:id` and `/:id/restore`.
+
+**Check what it exposes.** By default every column except `deletedAt` and `hidden`
+is returned to clients, so a column you add later becomes public. For a fixed
+allowlist, pass `schemas.response`: only its keys reach clients.
+
+Every part can change:
+
+- **Schemas:** `schemas.create`, `update`, `query` and `response`.
+- **Projection:** `toResponse`.
+- **Layers:** `repository`, `service` and `controller` take your subclasses, so
+  `class extends ResourceService` keeps its hooks.
+- **One binding:** `container.override(notes.tokens.service, …)`.
+
 ### The standard stack: `apiPreset`
 
 `@framework/presets` installs what a typical API needs: database, cache, queue,
