@@ -143,7 +143,7 @@ instances with `EVENTS_DRIVER=redis`.
 ```text
 apps/<your-app>/
 ├── app/modules/<feature>/   # business modules (schemas, repository, service, routes…)
-├── app/providers/           # database, events, cache, storage, mail providers
+├── app/providers/           # your own providers (make:provider)
 ├── app/jobs/                # queue job registry
 ├── bootstrap/               # application, HTTP composition, middleware, OpenAPI
 ├── config/                  # validated, environment-mapped configuration

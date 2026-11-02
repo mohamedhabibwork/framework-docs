@@ -103,6 +103,13 @@ export const packages: readonly PackageEntry[] = [
     guide: '/cache/',
   },
   {
+    name: 'presets',
+    id: '@framework/presets',
+    summary: 'Ready-made provider stacks for applications: replace or disable any part.',
+    status: 'validated',
+    guide: '/modules/',
+  },
+  {
     name: 'storage',
     id: '@framework/storage',
     summary: 'Disk abstraction over local and cloud storage with per-operation options and path guards.',
