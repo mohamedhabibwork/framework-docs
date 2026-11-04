@@ -205,6 +205,12 @@ export const packages: readonly PackageEntry[] = [
     status: 'validated',
   },
   {
+    name: 'tenancy',
+    id: '@framework/tenancy',
+    summary: 'Resolve a tenant per request, and keep rows, schemas and keys apart.',
+    status: 'validated',
+  },
+  {
     name: 'socialite',
     id: '@framework/socialite',
     summary: 'Sign in through Google, GitHub, Apple or your own provider, with account linking.',

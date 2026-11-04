@@ -146,6 +146,12 @@ export const PAGES: readonly PageMeta[] = [
     description: 'A deny-by-default gate: roles, permissions and subject-level abilities.',
   },
   {
+    slug: 'tenancy',
+    source: 'docs/tenancy.md',
+    title: 'Tenancy',
+    description: 'Resolve a tenant per request, and keep rows, schemas and keys apart.',
+  },
+  {
     slug: 'socialite',
     source: 'docs/socialite.md',
     title: 'Social login',
