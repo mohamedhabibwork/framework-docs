@@ -1,0 +1,91 @@
+# Authorization
+
+`@framework/authorization` decides what a signed-in principal may do. Everything is
+denied unless something grants it.
+
+- **Permissions** are names like `posts.publish`, granted through roles.
+- **Abilities** are rules about a specific thing, like "may edit this post".
+
+## Setup
+
+```ts
+// config: validate with authorizationConfigSchema
+authorization: {
+  driver: 'config', // or 'database', or 'memory' in tests
+  roles: { admin: ['*'], editor: ['posts.publish', 'posts.view'] },
+  assignments: { 'user-id': ['editor'] }, // config and memory drivers only
+},
+
+// providers
+createAuthorizationProvider<AppConfig>(),
+```
+
+Roles often live on the user row. Point `rolesOf` at them:
+`createAuthorizationProvider({ rolesOf: (actor) => [actor.user.role] })`.
+
+Declare your permissions once to have typos fail to compile:
+
+```ts
+declare module '@framework/core' {
+  interface Register {
+    permissions: 'posts.publish' | 'posts.view' | 'users.manage';
+  }
+}
+```
+
+## Checking
+
+```ts
+http.post('/posts/:id/publish', requirePermission('posts.publish'), handler);
+
+const gate = resolve(c, GATE);
+await gate.can(principal, 'posts.publish'); // true or false
+await gate.authorize(principal, 'posts.publish'); // throws 401 or 403
+
+// With defineResource: each ability needs `posts.<ability>`
+defineResource(posts, { access: permissionPolicy('posts') });
+```
+
+**A permission needs two things:** a role that grants it, and a principal whose own
+abilities allow it. So an API token scoped to `orders.view` can't use its owner's admin
+role, and a token's scope never grants what its owner's roles don't. Sessions hold `*`,
+so they get whatever their roles give. A role's `*` grants every permission.
+
+A request reads its roles once. A role change applies to the next request.
+
+## Abilities
+
+```ts
+const editPost = defineAbility<Post>(
+  'posts.edit',
+  async ({ actor, subject, can }) => subject.authorId === actor.id || (await can('posts.moderate')),
+);
+
+await gate.authorize(principal, editPost, post);
+http.patch(
+  '/posts/:id',
+  authorizeAbility(editPost, (c) => loadPost(c)),
+  handler,
+);
+```
+
+Only a real `true` passes, and a check that throws is a 500, never a pass.
+`make:ability EditPost` scaffolds one.
+
+**An ability's name is also a scope.** A session passes straight to the check, but a
+scoped API token or JWT must hold the ability's name, such as `posts.edit`, or it's denied.
+So an ownership rule can't be passed by a token issued for something unrelated. Issue tokens
+with the names of the abilities they should reach.
+
+`authorizeAbility` denies a missing subject without running the check.
+
+## Database roles
+
+With `driver: 'database'`, export `authorizationRoles`, `authorizationRolePermissions` and
+`authorizationUserRoles` from your schema. `ROLE_STORE` then offers `assign`, `revoke` and
+`rolesOf`, and removing a user removes their assignments.
+
+`bun run cli -- permission:sync --confirm` makes each role in config hold exactly its
+listed permissions in the database. It keeps assignments, and leaves roles it doesn't
+list alone, so removing a role from config doesn't remove it from the database, and its
+holders keep its permissions until you clear it by hand.

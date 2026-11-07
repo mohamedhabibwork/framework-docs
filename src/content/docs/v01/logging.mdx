@@ -1,0 +1,168 @@
+---
+title: Logging
+description: 'Structured, redacted, correlation-aware logging with @framework/logging: levels, sinks and ambient execution context.'
+---
+
+# Logging
+
+`@framework/logging` is the framework's configurable logging engine. Every
+entry is structured, masked for secrets before any sink sees it, and enriched
+with the ambient execution context — the correlation id and actor of the
+current request or job — so all lines from one execution are greppable
+together. Under the hood it wraps the `@mohamedhabibwork/loggerkit` package and
+adds the two framework semantics on top: context enrichment and redaction.
+
+## Setup
+
+Generated applications already ship a provider that binds the `logging`
+config section to a process-wide logger singleton:
+
+```ts
+// app/providers/logging.provider.ts
+import { createLoggingProvider } from '@framework/logging';
+import type { AppConfig } from '../../config';
+
+export const loggingProvider = createLoggingProvider<AppConfig>((config) => config.logging);
+```
+
+Register it in your bootstrap providers (it already is, if you generated the
+app). On container shutdown the logger's sinks are flushed and closed, so file
+entries never trail.
+
+Configure through the `logging` section or its environment variables —
+precedence is process env, then env file, then schema defaults:
+
+| Key        | Env             | Default   | Meaning                                          |
+| ---------- | --------------- | --------- | ------------------------------------------------ |
+| `level`    | `LOG_LEVEL`     | `info`    | Entries below this level are dropped             |
+| `name`     | `LOG_NAME`      | `app`     | Service name carried on every entry              |
+| `driver`   | `LOG_DRIVER`    | `console` | Sink: `console`, `file` or `memory`              |
+| `filePath` | `LOG_FILE_PATH` | —         | Required when `driver: 'file'`                   |
+| `maxBytes` | `LOG_MAX_BYTES` | —         | Rotate the file before a write would exceed this |
+
+A typical production `.env` uses the file driver:
+
+```bash
+LOG_LEVEL=info
+LOG_DRIVER=file
+LOG_FILE_PATH=storage/logs/app.log
+LOG_MAX_BYTES=10485760
+```
+
+An invalid section fails fast with a `ConfigError` — for example, `driver:
+'file'` without `filePath` is rejected at boot, never at the first write.
+
+## Usage
+
+Resolve the logger from the request scope in handlers, or from the container
+elsewhere:
+
+```ts
+import { LOGGER } from '@framework/logging';
+import { resolve } from '@framework/http';
+
+http.post('/orders', async (c) => {
+  const logger = resolve(c, LOGGER);
+  logger.info('order created', { orderId: order.id });
+});
+```
+
+The `FrameworkLogger` contract is deliberately small:
+
+```ts
+logger.debug('cache miss', { key });
+logger.info('job done', { attempts: 2 });
+logger.warn('retrying', { attempt: 3 });
+logger.error('boom', new Error('kaboom')); // live Error, serialized on the entry
+logger.error('boom', { userId }); // or structured fields
+logger.isLevelEnabled('debug'); // skip costly field building
+```
+
+Pass an `Error` directly to `error()` — it lands on the entry's `error` field
+with its name, message and cause intact, and the correlation id stays on the
+same line.
+
+## Advanced
+
+### Child loggers
+
+`child()` derives a sub-logger with additional bindings. It inherits the
+parent's sinks, level, redaction and context enrichment, while its bindings
+stay isolated — the parent's lines never gain them:
+
+```ts
+const db = logger.child({ module: 'db' });
+db.info('query', { ms: 5 });
+// entry carries module: 'db' alongside correlationId and actor
+```
+
+### Ambient context on every line
+
+Every entry carries `correlationId`, `actorId` and `actorType` read from the
+runtime's `AsyncLocalStorage`. Inside a request — or a queued job (see
+`/queues/`) — these are the real values installed by the auth guard's
+`resolveActor` hook. Outside any execution (boot code, scripts, tests) entries
+fall back to the standalone context: `correlationId: 'standalone'`, anonymous
+actor. Either way, lines stay consistent and greppable.
+
+### Automatic redaction
+
+Call-site fields are run through the same `redact` rules as framework config
+before any sink sees them. Secret-looking keys (`password`, `token`,
+`authorization`, `api_key`, …) and credentials embedded in URLs are replaced
+with the `REDACTED` sentinel — nested objects included:
+
+```ts
+logger.info('signup', {
+  password: 'hunter2',
+  dbUrl: 'postgres://user:p4ss@host/db',
+});
+// → { password: '[REDACTED]', dbUrl: 'postgres://user:[REDACTED]@host/db' }
+```
+
+You never opt in and cannot opt out; write fields freely. `Error` values pass
+through untouched so the stack survives serialization.
+
+### The file sink and lifecycle
+
+The `file` driver writes one NDJSON object per line, carrying `name`, `level`,
+`message` and the enriched fields. `maxBytes` rotates the file before the write
+that would exceed it. `flush()` awaits all in-flight writes — call it at the
+end of scripts — and `close()` (flush plus close, idempotent) runs
+automatically on container shutdown.
+
+### When to use `@framework/support`'s `logger()` instead
+
+`@framework/support` exports a zero-config `logger(scope)` helper that writes
+one JSON line to stderr with `time`, `level`, `scope`, `message`,
+`correlationId` and `actorId` — the same ambient context, because both read the
+same execution state. It has no configured levels, sinks or redaction: redact
+yourself with `redactForLogs()` and keep values JSON-safe.
+
+Reach for `LOGGER` (`@framework/logging`) whenever the logging provider is
+wired — it is the engine with levels, sinks, redaction and flushing. Reach for
+`support`'s `logger()` in quick scripts or boot code before the container
+exists, where a plain contextual line is enough.
+
+## Testing
+
+Use the `memory` driver for a working logger without a file, or adapt an
+existing loggerkit logger with `bindLogger` to keep enrichment and redaction:
+
+```ts
+import { createLogger } from '@mohamedhabibwork/loggerkit/factory';
+import { createCapture } from '@mohamedhabibwork/loggerkit/testing';
+import { bindLogger } from '@framework/logging';
+
+const capture = createCapture();
+const logger = bindLogger(createLogger({ name: 'test', sinks: [capture.sink] }));
+
+logger.info('hello', { userId: 'u-9' });
+expect(capture.entries[0]?.context.correlationId).toBe('corr-logging');
+expect(capture.entries[0]?.context.userId).toBe('u-9');
+```
+
+The package's own suite in `packages/logging/tests/logging.test.ts` covers the
+patterns worth copying: enrichment inside `runWithExecution`, the standalone
+fallback, redaction of nested keys and URL credentials, level suppression, and
+NDJSON file output with `flush()`.

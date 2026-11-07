@@ -1,0 +1,11 @@
+---
+/**
+ * The package strip on the landing page. Reads the catalog so the list can
+ * never drift from /packages/.
+ */
+import { packages } from '../../data/packages';
+---
+
+<div class="packages">
+	{packages.map((entry) => <a class="package-pill" href="/packages/#{entry.name}">{entry.name}</a>)}
+</div>

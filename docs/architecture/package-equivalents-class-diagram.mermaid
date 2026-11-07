@@ -1,0 +1,288 @@
+%% Package equivalents — contracts, providers & storage seams
+%% Companion to docs/architecture/laravel-package-equivalents.md
+%% @framework/oauth-server (Passport), @framework/prompts, @framework/search (Scout),
+%% @framework/socialite, @framework/observatory (Telescope)
+
+classDiagram
+    direction LR
+
+    %% ───────────────────────────── @framework/oauth-server (Passport) ─────────────────────────────
+    class AuthorizationServer {
+        +authorize(req, principal) AuthorizeDecision
+        +consent(principal, decision) string
+        +token(req) TokenResponse
+        +introspect(token) IntrospectionResponse
+        +revoke(token) void
+    }
+    class GrantHandler {
+        <<interface>>
+        +type OAuthGrantType
+        +handle(req, deps) TokenResponse
+    }
+    class AuthorizationCodeGrant {
+        +handle(req, deps) TokenResponse
+    }
+    class ClientCredentialsGrant {
+        +handle(req, deps) TokenResponse
+    }
+    class RefreshTokenGrant {
+        +handle(req, deps) TokenResponse
+    }
+    class TokenIssuer {
+        <<interface>>
+        +format string
+        +issue(claims) string
+        +verify(token) AccessClaims
+    }
+    class JwtTokenIssuer {
+        +format jwt
+        +issue(claims) string
+    }
+    class OpaqueTokenIssuer {
+        +format opaque
+        +issue(claims) string
+    }
+    class OAuthClientStore {
+        <<interface>>
+        +find(id) OAuthClient
+        +verifySecret(id, secret) bool
+        +register(input) RegisterResult
+    }
+    class PgOAuthClientStore
+    class OAuthCodeStore {
+        <<interface>>
+        +issue(input) string
+        +consume(code, clientId) OAuthCodeRecord
+    }
+    class PgOAuthCodeStore
+    class OAuthTokenStore {
+        <<interface>>
+        +issueAccess(input) IssuedAccessToken
+        +issueRefresh(input) string
+        +findAccess(token) OAuthAccessRecord
+        +revoke(token) bool
+        +prune(now) int
+    }
+    class PgOAuthTokenStore
+    class OAuthConsentStore {
+        <<interface>>
+        +grantedScopes(userId, clientId) string[]
+        +grant(userId, clientId, scopes) void
+    }
+    class PgOAuthConsentStore
+    class ScopeRegistry {
+        +register(scope) void
+        +validate(names) string[]
+    }
+
+    AuthorizationServer --> GrantHandler : selects
+    AuthorizationServer --> TokenIssuer : issues via
+    AuthorizationServer --> OAuthClientStore
+    AuthorizationServer --> OAuthCodeStore
+    AuthorizationServer --> OAuthTokenStore
+    AuthorizationServer --> OAuthConsentStore
+    AuthorizationServer --> ScopeRegistry
+    GrantHandler <|.. AuthorizationCodeGrant
+    GrantHandler <|.. ClientCredentialsGrant
+    GrantHandler <|.. RefreshTokenGrant
+    TokenIssuer <|.. JwtTokenIssuer
+    TokenIssuer <|.. OpaqueTokenIssuer
+    OAuthClientStore <|.. PgOAuthClientStore
+    OAuthCodeStore <|.. PgOAuthCodeStore
+    OAuthTokenStore <|.. PgOAuthTokenStore
+    OAuthConsentStore <|.. PgOAuthConsentStore
+
+    %% ───────────────────────────── @framework/prompts ─────────────────────────────
+    class PromptSession {
+        +text(opts) string
+        +confirm(opts) bool
+        +select(opts) string
+        +multiselect(opts) string[]
+        +password(opts) string
+        +spinner(label) SpinnerControl
+        +answers Record
+    }
+    class Prompt {
+        <<interface>>
+        +kind string
+        +message string
+        +defaultValue any
+        +validate(value) string
+        +run(renderer) PromptAnswer
+    }
+    class Renderer {
+        <<interface>>
+        +interactive bool
+        +ask(prompt) PromptAnswer
+    }
+    class TtyRenderer
+    class NonInteractiveRenderer
+    class Validator {
+        <<interface>>
+        +call(value) string
+    }
+    class SpinnerControl {
+        +succeed(text) void
+        +fail(text) void
+        +stop() void
+    }
+
+    PromptSession --> Prompt : composes
+    PromptSession --> Renderer : renders via
+    Renderer <|.. TtyRenderer
+    Renderer <|.. NonInteractiveRenderer
+    Prompt --> Validator : validates
+    PromptSession --> SpinnerControl
+
+    %% ───────────────────────────── @framework/search (Scout) ─────────────────────────────
+    class SearchEngine {
+        <<interface>>
+        +name string
+        +capabilities SearchCapabilities
+        +upsert(index, docs) void
+        +remove(index, ids) void
+        +flush(index) void
+        +search(index, query) SearchResult
+        +paginate(index, query, page) Page
+    }
+    class MemorySearchEngine
+    class PostgresSearchEngine
+    class MeilisearchEngine {
+        <<optional peer>>
+    }
+    class TypesenseEngine {
+        <<optional peer>>
+    }
+    class SearchManager {
+        +engine() SearchEngine
+        +register(name, factory) void
+    }
+    class Indexer {
+        +register(index, opts) Unsubscribe
+    }
+    class SearchIndex {
+        +name string
+        +source CrudTable
+        +searchable string[]
+        +filterable string[]
+        +softDelete bool
+        +project(row) SearchDocument
+    }
+    class Searchable {
+        <<mixin>>
+    }
+
+    SearchEngine <|.. MemorySearchEngine
+    SearchEngine <|.. PostgresSearchEngine
+    SearchEngine <|.. MeilisearchEngine
+    SearchEngine <|.. TypesenseEngine
+    SearchManager --> SearchEngine : resolves by config
+    Indexer --> SearchIndex : indexes
+    Indexer --> SearchEngine : writes
+    SearchIndex --> Searchable
+
+    %% ───────────────────────────── @framework/socialite ─────────────────────────────
+    class SocialiteManager {
+        +driver(name) SocialProvider
+        +providers() string[]
+    }
+    class SocialProvider {
+        <<interface>>
+        +name string
+        +usesPkce bool
+        +redirectUrl(input) string
+        +exchangeCode(input) Tokens
+        +fetchUser(token, idToken) SocialUser
+    }
+    class GoogleProvider
+    class GitHubProvider
+    class SocialAccountStore {
+        <<interface>>
+        +find(provider, providerUserId) Link
+        +link(provider, providerUserId, userId) void
+        +unlink(userId, provider) bool
+    }
+    class PgSocialAccountStore
+
+    SocialiteManager --> SocialProvider : selects
+    SocialProvider <|.. GoogleProvider
+    SocialProvider <|.. GitHubProvider
+    SocialiteManager --> SocialAccountStore
+    SocialAccountStore <|.. PgSocialAccountStore
+
+    %% ───────────────────────────── @framework/observatory (Telescope) ─────────────────────────────
+    class Observatory {
+        +record(entry) void
+        +query(filter) ObservatoryEntry[]
+        +prune(before) int
+    }
+    class Watcher {
+        <<interface>>
+        +name WatcherName
+        +record(entry) void
+    }
+    class RequestWatcher
+    class QueryWatcher
+    class JobWatcher
+    class EventWatcher
+    class ExceptionWatcher
+    class MailWatcher
+    class CacheWatcher
+    class ObservatoryStore {
+        <<interface>>
+        +capabilities StoreCapabilities
+        +write(entry) void
+        +query(filter) ObservatoryEntry[]
+        +prune(before) int
+    }
+    class MemoryObservatoryStore
+    class PgObservatoryStore
+
+    Observatory --> ObservatoryStore : persists via
+    ObservatoryStore <|.. MemoryObservatoryStore
+    ObservatoryStore <|.. PgObservatoryStore
+    Watcher <|.. RequestWatcher
+    Watcher <|.. QueryWatcher
+    Watcher <|.. JobWatcher
+    Watcher <|.. EventWatcher
+    Watcher <|.. ExceptionWatcher
+    Watcher <|.. MailWatcher
+    Watcher <|.. CacheWatcher
+    RequestWatcher --> Observatory : records
+    QueryWatcher --> Observatory
+    JobWatcher --> Observatory
+    EventWatcher --> Observatory
+    ExceptionWatcher --> Observatory
+    MailWatcher --> Observatory
+    CacheWatcher --> Observatory
+
+    %% ───────────────────────────── shared seams reused (not redefined) ─────────────────────────────
+    class AuthService {
+        <<@framework/auth>>
+        +startSession(userId) Session
+    }
+    class UserProvider {
+        <<@framework/auth>>
+        +findByEmail(email) UserRecord
+        +create(input) UserRecord
+    }
+    class Principal {
+        <<@framework/auth>>
+    }
+    class EventBus {
+        <<@framework/events>>
+        +publish(event) void
+        +subscribe(channel, handler) Unsubscribe
+    }
+    class QueueManager {
+        <<@framework/queue>>
+        +add(name, payload) void
+    }
+
+    AuthorizationServer ..> Principal : authorize uses session principal
+    AuthorizationServer ..> UserProvider : sub to local user
+    GoogleProvider ..> AuthService : startSession on success
+    GitHubProvider ..> AuthService : startSession on success
+    Indexer ..> EventBus : subscribes
+    Indexer ..> QueueManager : dispatches index job
+    JwtTokenIssuer ..> AuthService : JWKS shared with jwt guard

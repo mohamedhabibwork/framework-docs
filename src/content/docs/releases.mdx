@@ -1,0 +1,80 @@
+---
+title: Releases
+description: What each framework release delivered.
+---
+
+import { LinkCard } from '@astrojs/starlight/components';
+
+Each release is tagged `vX.Y.Z` in the repository and recorded in the root
+`CHANGELOG.md` (Keep a Changelog format); this page is the narrative companion
+— what a release means for the framework and its docs. Every pre-1.0 minor
+release also freezes a docs snapshot of the previous line, as described on the
+[Versions](/versions/) page.
+
+## 0.2.0 — 2026-10-27
+
+The Laravel-parity release. Auth and the database/CLI lifecycle are complete,
+the kernel is secure by default, and the generator catalog now covers every
+everyday `make:*` scaffold. The 0.1 documentation is archived under
+[/v01/](/v01/).
+
+### Highlights
+
+- **Security by default** — mount-time authorization for admin route families
+  (explicit `'public'` to opt out), a generic `throttle` middleware, strict
+  security headers and CORS in the kernel.
+- **Auth completion** — email verification, password recovery without user
+  enumeration, TOTP two-step login with recovery codes, a JWT/JWKS guard with
+  key rotation, and row-level ownership scoping (`ownedBy`).
+- **Database and CLI lifecycle** — `db:seed` with seeders and factories,
+  `db:fresh` with production guards, queue management (`queue:failed`,
+  `retry`, `pause`, …), and `build` producing compiled server/worker binaries.
+- **Generators** — the CRUD slices plus `make:job`, `seeder`, `factory`,
+  `middleware`, `provider`, `event`, `listener`, `test`, and new in this
+  release `make:mail`, `notification`, `command`, `schedule`, `guard`,
+  `user-provider` and `migration`, all on one dry-run/conflict-safe pipeline.
+- **Deployment** — generated apps ship a multi-stage Bun Dockerfile, compose
+  `server`/`worker` services and a `/health/ready` probe; export artifacts can
+  live on any storage disk for multi-node setups.
+- **OpenAPI and quality gates** — per-status error envelope schemas from the
+  error catalog, and a per-package coverage gate in CI.
+- **AI integration** — `@framework/ai-mcp`, an MCP server that drives the
+  application CLI and searches these docs.
+
+## 0.1.0 — 2026-10-04
+
+The first tagged release. Delivery phases 0–4 are complete: runtime and
+adapter decisions, the core container and HTTP kernel, a coherent CRUD
+platform, sessions and tokens, and the full set of infrastructure subsystems
+backed by the `@mohamedhabibwork` kit adapters.
+
+### Highlights
+
+- **Core and HTTP** — container (singleton/scoped/transient, cycle detection),
+  validated frozen config, graceful shutdown, execution context; HTTP kernel
+  with request ids, error envelope, middleware registry, policies and auth
+  plumbing.
+- **Database and CRUD** — postgres-js connections, AsyncLocalStorage
+  transactions with savepoints, CRUD mixins, audit trail written in the same
+  transaction, migrations; a generic resource layer with audit routes,
+  import/export and OpenAPI 3.1 generation with a route drift check.
+- **Auth** — sessions, personal API tokens, guards and auth endpoints, plus
+  login rate limiting built on the cache rate limiter.
+- **Events and realtime** — typed event bus (in-memory or Redis pub/sub) and a
+  channel-allowlisted WebSocket hub.
+- **Queues, scheduling and workflows** — BullMQ dispatch/worker/batches, cron
+  scheduling on job schedulers, and a durable workflow/pipeline/stage engine.
+- **Kit-backed subsystems** — cache (CacheKit: memory/Redis, locks, fixed-window
+  rate limiting), storage (StorageKit: local disk driver), mail
+  (message/transport with redacted console transport), logging (LoggerKit
+  sinks with ambient correlation and redaction) and notifications (explicit
+  channels including push and messaging over NotifyKit).
+- **Tooling** — the CLI's `create` and `make:crud` generators, infrastructure
+  commands (`cache:clear`, `storage:check`, `session:prune`), Laravel-style
+  helpers, an isolated test harness, and a reference playground application.
+- **Docs** — the Starlight documentation site you are reading, with guides for
+  every subsystem and Laravel-style versioned snapshots.
+
+For the commit-level changelog, see `CHANGELOG.md` in the repository root.
+
+<LinkCard title="Versions — which docs line matches which framework release" href="/versions/" />

@@ -1,0 +1,328 @@
+# Storage
+
+`@framework/storage` gives every module one `StorageDisk` contract for reading
+and writing files: put/get/stream, copy/move, bounded listing and public
+URLs. Every file lives on a named disk whose visibility (`private` or
+`public`) is fixed at configuration time, and every path is guarded against
+traversal before it touches a filesystem. The `local` driver ships with the
+framework; every other driver is constructed through the storagekit engine.
+
+## Setup
+
+Register the provider — it reads the `storage` section of your configuration
+directly, so it takes no arguments:
+
+```ts
+// app/providers/storage.provider.ts
+import { defineProvider } from '@framework/core';
+import { createStorageProvider } from '@framework/storage';
+import type { AppConfig } from '../../config';
+
+export const storageProvider = defineProvider<AppConfig>(createStorageProvider<AppConfig>());
+```
+
+Each entry of `storage.disks` becomes a singleton under `storageDiskToken(name)`,
+and the `storage.default` disk is additionally bound to `STORAGE`:
+
+```ts
+import { STORAGE, storageDiskToken } from '@framework/storage';
+
+const disk = scope.resolve(STORAGE); // the default disk
+const publicDisk = scope.resolve(storageDiskToken('public')); // a named disk
+```
+
+### Configuration
+
+Environment variables:
+
+```sh
+STORAGE_DEFAULT_DISK=local
+# STORAGE_ROOT overrides the local disk's root (absolute path)
+```
+
+The `storage` section itself:
+
+```ts
+storage: {
+  default: 'local',
+  disks: {
+    local: {
+      driver: 'local',
+      root: './storage/app/private',
+      visibility: 'private',
+      // Extra storagekit local options (permissions, createDirectories, prefix, …)
+      options: { permissions: 0o600 },
+    },
+    public: {
+      driver: 'local',
+      root: './storage/app/public',
+      visibility: 'public',
+      publicBaseUrl: '/storage', // or 'https://cdn.example.com/files'
+    },
+    assets: {
+      driver: 's3',                    // or minio, azure, gcs, oracle, rustfs, r2
+      visibility: 'private',
+      // Forwarded verbatim to storagekit's createStorage for this driver:
+      // bucket, region, endpoint, credentials, forcePathStyle, prefix,
+      // publicUrlBase, client, clientOptions, native-only fields, …
+      options: {
+        bucket: 'assets',
+        region: 'eu-central-1',
+        prefix: 'uploads/',
+      },
+    },
+  },
+},
+```
+
+Rules enforced at boot:
+
+- `storage.default` must name an existing disk.
+- Public disks must declare `publicBaseUrl`; private disks never resolve a
+  public URL.
+- `root` may be absolute or relative to the process cwd and is created on
+  first use.
+- `options` is the storagekit config for that driver (minus `type`, which is
+  the `driver` field). The kit validates it when the disk is created; a missing
+  peer SDK or bad option surfaces as `STORAGE_DRIVER_UNAVAILABLE` at boot, never
+  as a module-not-found crash. For `local`, the framework owns `root`, so an
+  `options.root` is ignored.
+
+## Usage
+
+```ts
+const disk = scope.resolve(STORAGE);
+
+// Write text or bytes
+await disk.put('docs/hello.txt', 'hello storage');
+await disk.put('uploads/avatar.bin', new Uint8Array([0, 1, 2]));
+
+// Read content plus metadata
+const file = await disk.get('docs/hello.txt');
+new TextDecoder().decode(file.content); // 'hello storage'
+file.path; // 'docs/hello.txt', exactly as passed in
+file.size; // 13
+file.contentType; // MIME type derived from the extension, when derivable
+file.lastModified; // Date
+
+// Stream large files — a web ReadableStream that also supports for-await
+const stream = await disk.stream('exports/big.csv');
+for await (const chunk of stream) {
+  /* … */
+}
+
+// Inspect, reorganize, delete
+await disk.exists('docs/hello.txt'); // true
+await disk.size('docs/hello.txt'); // 13
+await disk.copy('docs/hello.txt', 'backup/hello.txt');
+await disk.move('backup/hello.txt', 'archive/2026/hello.txt');
+await disk.delete('docs/hello.txt'); // deleting a missing path is a no-op
+
+// Bounded recursive listing under a prefix
+const paths = await disk.list('docs'); // sorted; default limit 100
+const first50 = await disk.list('docs', { limit: 50 });
+
+// Cursor paging for large prefixes
+const page = await disk.listPage('docs', { limit: 100 });
+if (page.hasMore) await disk.listPage('docs', { limit: 100, cursor: page.cursor });
+```
+
+`list` is bounded by design: it walks until it has `limit` entries and stops
+(limits outside 1–1000 reject with `STORAGE_LIST_LIMIT_INVALID`). `listPage`
+maps onto the driver's own pagination and returns `{ files, cursor, hasMore }`.
+Reads, sizes, moves and copies of missing paths reject with
+`STORAGE_FILE_NOT_FOUND`; an unknown prefix lists empty.
+
+### Operation options
+
+Every operation accepts the storagekit option for its kind, so nothing the
+driver supports is out of reach:
+
+```ts
+// Upload: content type, user metadata, headers, conflict handling, multipart
+await disk.put('reports/q1.csv', csv, {
+  contentType: 'text/csv',
+  metadata: { owner: 'finance' },
+  cacheControl: 'private, max-age=60',
+  contentDisposition: 'attachment; filename="q1.csv"',
+  overwrite: false, // fails with STORAGE_FILE_EXISTS when present
+  multipart: { partSize: 8 * 1024 * 1024, concurrency: 4 },
+});
+
+// Read: a specific version, a byte range, or a cancellation signal
+await disk.get('reports/q1.csv', { versionId: 'v2' });
+await disk.get('reports/q1.csv', { range: { offset: 0, length: 1024 } });
+await disk.stream('reports/q1.csv', { signal: controller.signal });
+
+// Copy/move: overwrite policy plus the metadata the destination should carry
+await disk.copy('a.csv', 'b.csv', { overwrite: false, metadata: { source: 'a' } });
+await disk.move('b.csv', 'c.csv', { contentType: 'text/csv' });
+
+// Signed URLs: verb and lifetime (a bare number still means "expiresIn")
+await disk.signedUrl('reports/q1.csv', { action: 'read', expiresIn: 300 });
+await disk.signedUrl('reports/q1.csv', 300);
+```
+
+| Operation          | Options                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put`              | `visibility`, `contentType`, `metadata`, `cacheControl`, `contentDisposition`, `contentEncoding`, `overwrite`, `multipart`, `signal`, `native` |
+| `get`, `stream`    | `versionId`, `range` (`{ offset, length? }`), `signal`, `native`                                                                               |
+| `delete`           | `versionId`, `signal`, `native`                                                                                                                |
+| `exists`, `size`   | `versionId`, `signal`, `native`                                                                                                                |
+| `list`, `listPage` | `limit`, `cursor`, `recursive`, `signal`, `native`                                                                                             |
+| `copy`             | `overwrite`, `contentType`, `metadata`, `cacheControl`, `contentDisposition`, `contentEncoding`, `signal`, `native`                            |
+| `move`             | `overwrite`, `contentType`, `metadata`, `signal`, `native`                                                                                     |
+| `signedUrl`        | `action` (`read`/`write`/`delete`), `expiresIn`, `signal`, `native`                                                                            |
+
+`native` is the escape hatch: anything the framework does not model (S3
+`StorageClass`, `ServerSideEncryption`, `ACL`, Azure `tier`, GCS
+`predefinedAcl`, …) travels in that bag, typed by storagekit per driver.
+
+### The native client
+
+For SDK calls the contract does not wrap, resolve the driver client directly:
+
+```ts
+const client = await disk.native(); // S3Client, BlobServiceClient, …
+const etags = await disk.nativeRequest(async (s3) => {
+  /* typed by the driver; framework path guards do not apply here */
+});
+```
+
+`native()`/`nativeRequest()` are kit-backed on every driver; operations issued
+through them bypass the framework's path guard and error mapping on purpose.
+
+### Uploads
+
+Validate size and extension before persisting anything:
+
+```ts
+import { assertUploadAllowed } from '@framework/storage';
+
+assertUploadAllowed({
+  size: bytes.byteLength,
+  maxBytes: 5 * 1024 * 1024,
+  allowedExtensions: ['png', 'jpg'], // case-insensitive: photo.PNG passes
+  filename: upload.name,
+});
+await disk.put(`uploads/${upload.name}`, bytes);
+```
+
+Oversize uploads throw `STORAGE_FILE_TOO_LARGE`; disallowed extensions throw
+`STORAGE_EXTENSION_FORBIDDEN`. Extension rules require the original
+`filename`. For upload staging areas, `pruneTemp(root, maxAgeMs)` removes
+files older than the cutoff and drops the emptied directories.
+
+## Advanced
+
+### Visibility
+
+A disk's visibility is a hard boundary, not a per-file hint:
+
+- `publicUrl(path)` joins the configured base on a public disk
+  (`/storage/img/logo.png`) and throws `STORAGE_VISIBILITY_FORBIDDEN` on a
+  private one — a private file never resolves to a URL.
+- Per-write overrides cannot cross the split: `put(…, { visibility: 'public' })`
+  on a private disk rejects with `STORAGE_VISIBILITY_FORBIDDEN`, and so does
+  the reverse. A private file can never be promoted by a call-site flag.
+
+```ts
+const publicDisk = scope.resolve(storageDiskToken('public'));
+const url = publicDisk.publicUrl('img/logo.png'); // '/storage/img/logo.png'
+```
+
+### Path safety
+
+Every path argument is validated on every operation. Traversal attempts —
+`../escape.txt`, absolute paths (`/etc/passwd`), URL-encoded dots
+(`%2e%2e/escape`), backslashes, double slashes — reject with
+`STORAGE_PATH_FORBIDDEN` before any file access, on writes, reads, deletes,
+lists, moves, copies and `publicUrl` alike. The same guards are exported so
+your own tools validate exactly like the disks:
+
+```ts
+import { resolveInsideRoot, validateStoragePath } from '@framework/storage';
+
+const canonical = validateStoragePath('docs/hello.txt'); // 'docs/hello.txt'
+const absolute = resolveInsideRoot(disk.root, 'docs/hello.txt'); // strictly inside the root
+```
+
+### Capabilities and multi-driver
+
+Disks declare what they can do; local disks stream but never sign URLs:
+
+```ts
+disk.capabilities; // { streaming: true, signedUrls: false }
+await disk.signedUrl('docs/hello.txt'); // rejects STORAGE_CAPABILITY_UNSUPPORTED
+```
+
+Cloud drivers (`s3`, `r2`, `minio`, `azure`, `gcs`, `oracle`, `rustfs`, …)
+answer through the storagekit engine instead. Add the disk to `storage.disks`
+and install that driver's peer SDK — for example `@aws-sdk/client-s3` for
+`s3`. Only `driver` and the visibility fields are validated by the framework;
+the `options` bag is forwarded verbatim to storagekit:
+
+```ts
+disks: {
+  local: { driver: 'local', root: './storage/app/private', visibility: 'private' },
+  assets: {
+    driver: 's3',
+    visibility: 'private',
+    options: { bucket: 'my-bucket', region: 'eu-central-1' },
+  },
+},
+```
+
+`s3`, `r2` and `minio` are tested on every run against a real MinIO server, across
+reads, writes, streaming, listing, copy, move, delete, prefixes and signed URLs.
+`bun run db:up` starts it. Their options look like this:
+
+```ts
+// AWS S3: credentials default to the AWS SDK's own chain.
+{ driver: 's3', options: { bucket, region: 'eu-central-1' } }
+
+// Any S3-compatible server: name the endpoint and use path-style URLs.
+{ driver: 's3', options: { bucket, region: 'us-east-1', endpoint, forcePathStyle: true, credentials } }
+
+// Cloudflare R2: the same peer SDKs as s3.
+{ driver: 'r2', options: { bucket, accountId, credentials } }
+
+// MinIO through its own client (install `minio`); or use s3 with an endpoint.
+{ driver: 'minio', options: { bucket, endPoint: 'minio.internal', port: 9000, useSSL: true, accessKey, secretKey } }
+```
+
+`s3` and `r2` need `@aws-sdk/client-s3`, `@aws-sdk/lib-storage` and
+`@aws-sdk/s3-request-presigner`. The tests run the `r2` driver against MinIO, not
+Cloudflare, so try it once against a real R2 bucket.
+
+Boot creates every configured disk eagerly, so a missing peer SDK or invalid
+kit options fail startup with `STORAGE_DRIVER_UNAVAILABLE` instead of failing
+on the first file operation.
+
+## Testing
+
+Point a `LocalStorageDisk` at a temp directory for round-trip tests — the
+root is created on demand:
+
+```ts
+import { join } from 'node:path';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { LocalStorageDisk } from '@framework/storage';
+
+const disk = new LocalStorageDisk({
+  name: 'test',
+  root: await mkdtemp(join(tmpdir(), 'disk-')),
+  visibility: 'private',
+});
+```
+
+To test wiring, boot the `Application` with a `storage` config section and
+resolve `STORAGE` from the container. Boot failures are assertions too: a bad
+configuration (unknown default disk, empty root, public disk without a base
+URL) fails with `ConfigError`, and a cloud driver whose peer SDK is missing
+fails with `STORAGE_DRIVER_UNAVAILABLE`.
+
+Related: background jobs that produce artifacts run on the job system — see
+[Queues](queues.md) — and [Notifications](notifications.md) covers outbound
+messaging.

@@ -1,0 +1,105 @@
+%% ============================================================================
+%% Laravel v13 Parity Framework — Program Call Flows
+%% This file holds THREE sequence diagrams separated by "%% ----" banners:
+%%   (a) Application bootstrap with feature resolution
+%%   (b) One-line programmatic CRUD registration + a request
+%%   (c) feature:remove with the exclusion verification
+%% ============================================================================
+
+%% ---- (a) Application bootstrap with feature resolution ----------------------
+sequenceDiagram
+    autonumber
+    participant Dev as bootstrap/features.ts
+    participant FR as FeatureResolver
+    participant Reg as FeatureRegistry
+    participant App as Application
+    participant Prov as Providers (ordered)
+    participant Kit as KitRegistry
+
+    Dev->>FR: defineFeatures([...]) then resolve()
+    FR->>Reg: validate() + get(each name)
+    Reg-->>FR: FeatureDescriptor (or UNKNOWN_FEATURE at parse time)
+    FR->>FR: topoSort(requires) + assertPrerequisites()
+    alt missing prerequisite
+        FR-->>Dev: FeatureError MISSING_PREREQUISITE (bootstrap, named)
+    else ok
+        FR-->>Dev: FeaturePlan { order, providers, packages, excluded }
+        Dev->>App: new Application({ config, providers: plan.providers })
+        App->>App: orderProviders(dependsOn)
+        loop register (all providers)
+            App->>Prov: provider.register(ctx)
+            Prov->>Kit: registerAdapter(kitAdapter) [kit-backed only]
+            Kit-->>Prov: capabilities reported (honest)
+        end
+        loop boot (non-deferred, dependency order)
+            App->>Prov: provider.boot(ctx)
+        end
+        App-->>Dev: booted
+    end
+
+%% ---- (b) One-line programmatic CRUD registration + a request ----------------
+sequenceDiagram
+    autonumber
+    participant Dev as app/modules/products/index.ts
+    participant RB as ResourceBuilder
+    participant Reg as ResourceRegistration
+    participant App as Application
+    participant Http as Hono kernel
+    participant Ctrl as ResourceController
+    participant Svc as ResourceService
+    participant Repo as CrudRepository
+
+    Dev->>RB: defineResource(products).schema(...).access('authenticated').ownedBy('userId').relations(...)
+    RB->>RB: validate allowlists (no silent public, no private exposure)
+    Dev->>RB: .crud()
+    RB-->>Reg: ResourceRegistration { provider, routes, operations }
+    Reg->>App: register provider (binds service/controller/transform)
+    Dev->>Http: registerResource(http, Reg) mounts 5 native routes
+    Note over Http: POST/GET/GET:id/PATCH/DELETE under /api/v1/products
+    Http-->>Dev: route types exported for RPC
+
+    Http->>Ctrl: GET /api/v1/products/:id
+    Ctrl->>Svc: get(id)
+    Svc->>Svc: scopeFilters() (ownership) + beforeX hooks
+    Svc->>Repo: findById(id)
+    Repo-->>Svc: row | null
+    Svc-->>Ctrl: entity | 404 NOT_FOUND
+    Ctrl->>Ctrl: transform.toArray(entity)
+    Ctrl-->>Http: 200 public DTO
+    Http-->>Dev: response
+
+%% ---- (c) feature:remove with the exclusion verification ---------------------
+sequenceDiagram
+    autonumber
+    participant Dev as Developer
+    participant CLI as CLI feature:remove
+    participant Man as ManifestEditor
+    participant Src as SourcePruner (opt-in)
+    participant Ver as ExclusionVerifier
+    participant CI as bun toolchain
+
+    Dev->>CLI: feature:remove queue [--prune-sources] [--dry-run]
+    CLI->>CLI: resolve dependents (workflow/scheduler require queue)
+    alt dependents still enabled
+        CLI-->>Dev: exit 3 FEATURE_IN_USE (actionable: remove dependents first)
+    else safe
+        CLI->>Man: remove '@framework/queue' + kit dep from package.json
+        Man-->>CLI: manifest diff
+        opt --prune-sources
+            CLI->>Src: delete subsystem source files (framework-owned only)
+            Src-->>CLI: pruned file list
+        end
+        CLI->>Man: update bootstrap/features.ts (remove name)
+        CLI->>CI: bun install --frozen-lockfile (clean tree)
+        CLI->>Ver: feature:check invariants
+        Ver->>CI: (1) typecheck
+        Ver->>CI: (2) build
+        Ver->>CI: (3) boot the 3-feature app
+        Ver->>CI: (4) run suite
+        Ver->>Ver: (5) dependency-graph assertion: zero imports of excluded @framework/*
+        alt any invariant fails
+            Ver-->>Dev: nonzero + preserved reviewable state
+        else all pass
+            Ver-->>Dev: exit 0, removal verified (not asserted)
+        end
+    end

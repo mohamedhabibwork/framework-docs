@@ -1,0 +1,483 @@
+# Authoring Modules
+
+How a business feature is structured, and how the pieces derive from one
+canonical source: the Drizzle table.
+
+## Module anatomy
+
+```text
+app/modules/products/
+├── schemas.ts                    # Drizzle–Zod: create/update/response + query schemas
+├── dto/product.dto.ts            # inferred types (z.input / z.output) — never hand-copied
+├── requests/                     # form requests: schema + authorization hook
+│   ├── create-product.request.ts
+│   ├── update-product.request.ts
+│   └── list-products.request.ts
+├── responses/product.response.ts # explicit public projection
+├── repositories/product.repository.ts  # CRUD mixin composition
+├── services/product.service.ts   # business rules
+├── controllers/product.controller.ts   # validated input -> service -> serialized output
+├── policies/product.policy.ts    # per-ability authorization
+├── openapi.ts                    # operation metadata
+├── tests/product.crud.api.test.ts
+├── routes.ts                     # concrete native Hono routes (RPC-typed)
+├── provider.ts                   # DI registration (scoped per request)
+└── index.ts                      # public module exports
+```
+
+Generate all of it with `make:crud` (see the [CLI reference](cli-reference.md))
+or write it by hand following the same shape.
+
+## The canonical pipeline
+
+One table is the single source of truth; nothing duplicates its rules:
+
+```text
+database/schema/products.ts          (Drizzle table — the only place fields are declared)
+  → createInsertSchema / createUpdateSchema / createSelectSchema   (Drizzle–Zod)
+  → explicit .pick() allowlists + refinements                     (what is writable / public)
+  → form requests, response serializer, DTO types                 (z.input / z.output)
+  → Hono validation + OpenAPI + endpoint tests
+```
+
+```ts
+// schemas.ts
+export const createProductSchema = createInsertSchema(products, {
+  name: (field) => field.trim().min(1).max(120),
+})
+  .pick({ name: true, price: true })
+  .strict();
+
+export const updateProductSchema = createUpdateSchema(products)
+  .pick({ name: true, price: true })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required' });
+
+export const productResponseSchema = createSelectSchema(products).pick({ id: true, name: true, price: true });
+
+export type CreateProductDto = z.output<typeof createProductSchema>;
+```
+
+Conventions that keep money and timestamps correct in JSON:
+
+- `numeric` columns use `{ mode: 'string' }`-style transport (never floats).
+- `timestamp` columns use `mode: 'string'` so the select schema matches JSON.
+- Response serializers project fields explicitly — adding a column never
+  exposes it automatically.
+
+## Repository: typed mixin composition
+
+```ts
+import { Creatable, Deletable, Readable, RepositoryCore, SoftDeletable, Updatable } from '@framework/database';
+
+export class ProductRepository extends SoftDeletable(Updatable(Creatable(Readable(RepositoryCore<typeof products>)))) {}
+```
+
+- `Readable` — `findById`, `paginate` (bounded, deterministic `id` ordering),
+  `findMany` (ordered, hard-capped), `count`, `exists`, and `batches`
+  (keyset iteration for large exports).
+- `Creatable` / `Updatable` — `create`, `createMany` (imports), `update`,
+  and `updateMany(changes, query)` for filtered bulk updates; each runs
+  `beforeCreate` / `beforeUpdate` / `beforeUpdateMany` hooks.
+- `Deletable` **or** `SoftDeletable` — mutually exclusive (a collision check
+  fails at composition time). Both provide `deleteMany(query)` and
+  `deleteByIds(ids)` returning the affected ids; soft delete additionally has
+  `restore()` and `restoreMany(query)`, sets `deletedAt` with the database
+  clock, and hides deleted rows from reads and updates.
+- Bulk operations are audited per record: with the `Auditable` mixin on,
+  `createMany` / `updateMany` / `deleteMany` lock the affected rows and write
+  one audit entry each inside the same transaction.
+- `Auditable(Base, 'products')` — records every write into `audit_logs` in
+  the same transaction, with field-level diffs; adds `auditTrail` /
+  `auditLog` queries.
+
+Constructor: `new ProductRepository(products, dataContext, options)` where
+`options.softDeleteColumn` enables soft delete and `options.auditExclude`
+hides secret columns from audit snapshots. Transactions propagate through
+`dataContext.transactions` (AsyncLocalStorage; nesting becomes SAVEPOINTs) —
+callers never pass connections around.
+
+### Scoping (multi-tenancy hook)
+
+Override `scopeConditions()` to inject row filters (tenant, ownership) into
+every read and write:
+
+```ts
+override scopeConditions() {
+  const tenantId = this.context.execution.actor.tenantId;
+  return tenantId ? [eq(products.tenantId, tenantId)] : [];
+}
+```
+
+## Service: context, hooks, transactions, events
+
+Services extend the framework base. The provider injects the repository, the
+**shared request context** (the same `DataContext` its repository holds —
+one actor, one transaction chain per request), and the event wiring. The
+defaults run as-is; override hooks or methods to add business rules:
+
+```ts
+export class ProductService extends ResourceService<Product, CreateProductDto, UpdateProductDto> {
+  protected override beforeCreate(input: CreateProductDto): CreateProductDto {
+    return { ...input, name: input.name.trim() };
+  }
+
+  protected override async afterCreate(entity: Product): Promise<void> {
+    // queue dispatches, cache invalidation, notifications…
+  }
+}
+```
+
+### Context in every service
+
+The second constructor argument is the shared context — available to
+subclasses as `this.context` (and `this.execution` for short):
+
+```ts
+interface ServiceContext {
+  readonly execution: ExecutionContext; // actor + correlation id
+  readonly transactions?: TransactionContext; // scope's transaction chain
+}
+```
+
+Nothing is recreated on the way down: controller → service → repository all
+resolve the same per-request instance, so audit rows and events are
+attributed to the same actor and correlation id. Run several writes
+atomically with `this.transaction(work)` — it joins the scope's open
+transaction or opens one. When no context is injected (scripts, tests),
+`DEFAULT_SERVICE_CONTEXT` applies and `transaction` simply runs `work`.
+
+### Hooks
+
+Available hooks: `before/afterCreate`, `before/afterUpdate`,
+`before/afterDelete`, `before/afterRestore`, `before/afterImport`.
+
+### Entity events
+
+Constructor options wire the event bus (the generated provider does this;
+events publish after the write commits):
+
+```ts
+new ProductService(repository, dataContext, {
+  channel: 'products', // publishes products.created|updated|…
+  bus, // EventBus binding (skipped when absent)
+  serialize: (entity) => toProductResponse(entity),
+});
+```
+
+Unknown ids throw the framework's `404 NOT_FOUND` envelope (customizable via
+`options.missing`).
+
+## Routes, policies, form requests
+
+Routes stay concrete native Hono declarations so RPC inference is preserved.
+Per-route order: validation → authorization → handler.
+
+```ts
+export const productRoutes = new Hono<FrameworkEnv>()
+  .get('/', validate('query', listProductsRequest.schema), authorizeRequest(listProductsRequest), async (c) =>
+    c.json(await controller(c).list(c.req.valid('query')), 200),
+  )
+  .post('/', validate('json', createProductRequest.schema), authorizeRequest(createProductRequest), async (c) =>
+    c.json(await controller(c).store(c.req.valid('json')), 201),
+  )
+  .get('/:id', validate('param', productIdParamSchema), authorize(productPolicy, 'view'), async (c) =>
+    c.json(await controller(c).show(c.req.valid('param').id), 200),
+  );
+```
+
+A form request groups a schema with its authorization hook:
+
+```ts
+export const createProductRequest = defineFormRequest({
+  schema: createProductSchema,
+  authorize: (c) => productPolicy.create(c),
+});
+```
+
+Policies are explicit per ability — nothing is reachable by omission:
+
+```ts
+export const productPolicy: ResourcePolicy = {
+  ...denyAll,
+  viewAny: () => true,
+  view: () => true,
+  create: () => true,
+  update: () => true,
+  delete: () => true,
+};
+```
+
+Abilities: `viewAny, view, create, update, delete, audit, export, import,
+bulkCreate, bulkDelete, *`.
+
+## Controller
+
+Controllers extend the framework base too — it provides `list/show/store/
+update/destroy` (+`restore`) with the serializer injected; override any
+method for custom behavior while keeping the route contract:
+
+```ts
+export class ProductController extends ResourceController<
+  Product,
+  CreateProductDto,
+  UpdateProductDto,
+  ProductResponseDto
+> {
+  constructor(service: ProductService) {
+    super(service, toProductResponse);
+  }
+}
+```
+
+## OpenAPI metadata
+
+Operations are **derived from the controller contract** — the same schemas
+the routes validate and the responses serialize document the five endpoints
+(list, create, show, update, delete). No hand-maintained metadata:
+
+```ts
+// openapi.ts
+import { resourceOperations } from '@framework/crud';
+
+export const productOperations = resourceOperations({
+  mount: '/api/v1/products',
+  resource: 'Product', // operationIds: listProduct(s), createProduct, …
+  security: 'public', // or ['bearerAuth'] once auth exists
+  schemas: {
+    create: createProductSchema,
+    update: updateProductSchema,
+    response: productResponseSchema,
+    query: listProductsQuerySchema,
+    param: productIdParamSchema,
+  },
+});
+```
+
+The derivation follows the controller 1:1: `list(query)` → `GET /` with a
+`pageSchema` response, `store(create)` → `POST /` (201), `show(param)` →
+`GET /:id`, `update(param, update)` → `PATCH /:id`, `destroy(param)` →
+`DELETE /:id` (204) — each with its error statuses (422 validation, 404,
+409 conflicts, 400 malformed). Operation ids are stable
+(`listProducts`, `createProduct`, …) and the OpenAPI tag defaults to the
+English plural (`Products`).
+
+For endpoints that deviate from the standard five, describe them explicitly
+with `defineOperations` and merge the lists. The module's operations travel
+with its `defineModule` export (see Registration), then emit/check with
+`openapi:generate` / `openapi:check`.
+
+## Registration
+
+The module provider binds repository, service and controller **scoped** so
+every request shares one data context (transaction + execution) and one
+execution context across all three layers:
+
+```ts
+container.scoped(PRODUCT_REPOSITORY, (r) => new ProductRepository(products, r.resolve(DATA_CONTEXT)));
+container.scoped(
+  PRODUCT_SERVICE,
+  (r) =>
+    new ProductService(r.resolve(PRODUCT_REPOSITORY), r.resolve(DATA_CONTEXT), {
+      channel: 'products',
+      ...(r.has(EVENT_BUS) ? { bus: r.resolve(EVENT_BUS), serialize: (entity) => toProductResponse(entity) } : {}),
+    }),
+);
+container.scoped(PRODUCT_CONTROLLER, (r) => new ProductController(r.resolve(PRODUCT_SERVICE)));
+```
+
+Registration points (all idempotent, marker-based):
+
+| What          | File                       | Marker                         |
+| ------------- | -------------------------- | ------------------------------ |
+| Schema export | `database/schema/index.ts` | `// @framework:schema-exports` |
+| Module        | `bootstrap/app.ts`         | `// @framework:modules`        |
+
+The module's `index.ts` exports a `defineModule` bundle (provider, routes,
+operations), so `make:crud` adds one line to `bootstrap/app.ts`. It refuses a
+route already mounted by another module or in that file. When editing by hand,
+register in the same two places.
+
+Apps created before `defineApp` keep the older layout: with no `paths.app` in
+`bin/cli.ts`, `make:crud` registers the provider in `bootstrap/providers.ts`
+(`// @framework:providers`), the routes in `routes/api.ts`
+(`// @framework:routes`) and the operations in `bootstrap/openapi.ts`
+(`// @framework:openapi-operations`).
+
+### One registration point: `defineModule` and `defineApp`
+
+`@framework/http` can bundle the provider, the routes and the operations into a
+single module that you register in one place. Apps generated by `create` use
+this layout, and `make:crud` emits the `defineModule` export:
+
+```ts
+// app/modules/products/index.ts
+export const productsModule = defineModule<AppConfig, Operation>({
+  name: 'products',
+  providers: [productsProvider],
+  routes: { path: '/products', app: productRoutes }, // mounted under the API prefix
+  operations: productOperations,
+});
+
+// bootstrap/app.ts
+export const app = defineApp<AppConfig, Operation>({
+  http: (config) => ({ exposeInternalErrors: config.app.debug, maxBodyBytes: config.http.maxBodyBytes }),
+  providers, // framework and shared infrastructure providers
+  modules: [productsModule],
+  health: { checks: [databaseHealthCheck(), cacheHealthCheck(), queueHealthCheck()] },
+  overrides: (container) => container.override(MAIL_TRANSPORT, () => new SmtpTransport()),
+  routes: (http, application) => http.route('/ws', application.container.resolve(WEBSOCKET_GATEWAY).routes()),
+});
+
+const application = await app.createApplication(config).boot();
+const http = app.createHttp(application); // generateOpenApiDocument({ operations: app.operations, … })
+```
+
+- **Defaults:** module routes mount under `/api/v1` (change it with
+  `apiPrefix`), and `/health` is mounted unless you pass `health: false`.
+- **Order:** kernel, then `/health`, then `middleware` (e.g. the `api` throttle
+  group), then the modules and the `routes` hook, so middleware wraps everything
+  except the health probes.
+  The `http` callback also receives the application, for options such as
+  `resolveActor`.
+- **Failures:** duplicate module names and colliding routes fail at startup.
+- **Overrides:** `overrides` runs before any provider registers, and
+  `container.override` wins regardless of order, so any binding can be
+  replaced, including framework-owned ones.
+- **Typed RPC clients:** routes mounted in the loop don't carry Hono's RPC
+  types into one app-wide `AppType`. Type clients per module instead:
+  `hc<typeof productRoutes>(…)`.
+
+### One call: `defineResource`
+
+`defineResource` from `@framework/crud` turns a table into a full CRUD module:
+repository, service, controller, routes, policy and OpenAPI operations.
+
+```ts
+export const notes = defineResource(notesTable, {
+  access: 'authenticated', // or 'public', or your own ResourcePolicy
+  ownedBy: 'authorId', // scopes every operation to the acting user
+  hidden: ['internalRef'], // out of responses and of what clients may write
+});
+
+// defineApp({ modules: [notes] })
+const client = hc<typeof notes.routes.app>('/api/v1/notes'); // fully typed
+```
+
+It mounts list, show, create, update and delete. Tables with a `deletedAt` column
+also get `/deleted`, `/deleted/:id` and `/:id/restore`.
+
+**Check what it exposes.** By default every column except `deletedAt` and `hidden`
+is returned to clients, so a column you add later becomes public. For a fixed
+allowlist, pass `schemas.response`: only its keys reach clients.
+
+Every part can change:
+
+- **Schemas:** `schemas.create`, `update`, `query` and `response`.
+- **Projection:** `toResponse`.
+- **Layers:** `repository`, `service` and `controller` take your subclasses, so
+  `class extends ResourceService` keeps its hooks.
+- **One binding:** `container.override(notes.tokens.service, …)`.
+
+**Filtering, sorting and relations** are allowlists you name per resource. Anything
+else in the query string is a 422:
+
+```ts
+export const articles = defineResource(articlesTable, {
+  access: 'public',
+  hidden: ['secret'],
+  filterable: { status: true, views: ['gte', 'lte'], title: ['contains'] },
+  sortable: ['views', 'title'],
+  relations: {
+    author: belongsTo(authors, { columns: ['id', 'name'] }),
+    comments: hasMany(comments, { columns: ['id', 'body'], limit: 20 }),
+  },
+  columns: { meta: z.object({ tags: z.array(z.string()) }) },
+});
+```
+
+```text
+GET /articles?filter[status][eq]=published&filter[views][gte]=10&sort=-views,title&include=author,comments
+```
+
+- **Operators:** `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in` (comma-separated) and
+  `contains` (case-insensitive, text only). `true` allows what suits the column's
+  type. Each value is validated against its column, so a bad one is a 422 rather
+  than a database error.
+- **Hidden columns** can't be filtered or sorted, because comparisons would reveal
+  their values. Listing one fails when the resource is defined.
+- **Relations** find their foreign key on their own; pass `foreignKey` when several
+  connect the tables. `columns` is required, so a related table's other columns
+  stay private. Each relation runs one query however many rows are listed, skips
+  soft-deleted rows and returns `null` or `[]` when there's nothing to include.
+- **Included rows skip the related table's policy and `ownedBy`.** Clients can
+  often write a foreign key, so a caller could point one at someone else's row and
+  read it through `?include=`. List only columns any caller may see, or scope the
+  relation with `where: ({ execution }) => eq(categories.ownerId, execution.actor.id)`.
+- **`hasMany` limits** cap what's returned, 100 rows per parent unless you set
+  `limit`. They don't cap the work: the query still ranks every child of the listed
+  parents, so index the foreign key and keep very large child tables out of
+  `relations`.
+- **`pgEnum` columns** become `z.enum` by themselves. `columns` replaces a column's
+  schema, typically the shape of a `jsonb` column, and optionality still follows
+  the table.
+- **OpenAPI and the RPC client** see every filter, `sort`, `include` and included
+  row.
+
+These generate the list query, so they can't be combined with `schemas.query`.
+Hand-written modules get the same query from `defineListQuery(table, { filterable,
+sortable })`, which returns its `schema` and `toOptions(parsedQuery)`.
+
+`make:crud Note --fields 'body:text:required' --access public --compact` generates
+this call with `schemas.ts`, which keeps the column refinements and an explicit
+response allowlist. It runs the same endpoint suite as the default expanded
+layout, which generates every layer as files you edit. Generators such as
+`make:service` extend an expanded module.
+
+`make:crud` finds route collisions by reading source text, so write `path`
+explicitly on a hand-written `defineResource`. Without it, a duplicate is caught
+when the app starts rather than at generation.
+
+For `access: 'authenticated'`, callers need `<abilityPrefix>.<ability>`, such as
+`notes.view`. Sessions hold `*`; API tokens carry only what they were issued.
+
+### The standard stack: `apiPreset`
+
+`@framework/presets` installs what a typical API needs: database, cache, queue,
+events, logging, storage, mail, notifications and queued import/export. Each
+default reads its section of your config. Apps generated by `create` use it:
+
+```ts
+const api = apiPreset<AppConfig>({
+  listeners,
+  notifications: { definitions: notifications, job: notificationDeliveryJob },
+});
+
+export const app = defineApp<AppConfig, Operation>({
+  providers: api.providers,
+  modules: [...api.modules, productsModule],
+  health: api.health,
+  http: (config) => ({ exposeInternalErrors: false }),
+});
+```
+
+Every part can change:
+
+- **Replace it:** pass a provider, such as `mail: myMailProvider`. Readiness
+  probes stay on for the database, cache and queue.
+- **Remove it:** pass `false`, such as `data: false`. That part's readiness
+  probe goes too. Providers that depend on it then fail at boot with a clear
+  error.
+- **Change one binding:** use `defineApp({ overrides })`.
+
+The worker must run the notification delivery job you pass in, so keep it in
+`app/jobs/index.ts`.
+
+`api.modules` holds the import/export routes under `/api/v1/data`. They are
+denied in production until you pass a guard, such as
+`data: { authorize: requireAuth() }`. The documented paths assume the default
+`/api/v1` prefix.
+
+In `bin/cli.ts`, `apiProject` from `@framework/presets/cli` fills in the
+conventional paths, tools and config hooks. Pass `overrides` to change any of
+them. It lives on its own entry point so servers and workers never load the CLI.

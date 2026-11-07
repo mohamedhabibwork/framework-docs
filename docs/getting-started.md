@@ -1,0 +1,193 @@
+# Getting started
+
+From an empty machine to a running API with real PostgreSQL, an audit trail,
+events and queues — in two commands.
+
+## Prerequisites
+
+| Tool                                        | Version               | Why                                                 |
+| ------------------------------------------- | --------------------- | --------------------------------------------------- |
+| [Bun](https://bun.sh)                       | ≥ 1.4                 | Runtime, package manager, test runner, bundler      |
+| Docker (or PostgreSQL 17 + Redis 7 servers) | Compose v2            | Local infrastructure via `deployment/compose.yaml`  |
+| Node.js                                     | ≥ 22.23.4 (docs only) | Astro 7 requires it to build the documentation site |
+
+Application code runs on Bun only. Node is needed solely for `bun run docs:dev`
+and `bun run docs:build`; the framework does not support a Node runtime yet
+(see [Implementation status](status.md#known-limitations)).
+
+## Path A — run the reference application
+
+The playground is a complete application: a `products` module with tests, auth
+tables, workflows, schedules and seeders.
+
+```sh
+bun install                                          # install the workspace
+bun run db:up                                        # PostgreSQL :54329 + Redis :63799
+cp .env.test.example .env.test                       # TEST_DATABASE_URL for endpoint tests
+cp apps/playground/.env.example apps/playground/.env # DATABASE_URL for the app
+bun run cli -- db:migrate                            # apply migrations
+bun run dev                                          # http://127.0.0.1:3000
+```
+
+Prove it works:
+
+```sh
+curl -s localhost:3000/health/live                   # {"status":"ok"}
+curl -s localhost:3000/health/ready                  # database + Redis + queue
+curl -s -X POST localhost:3000/api/v1/products \
+  -H 'content-type: application/json' \
+  -d '{"name":"coffee","price":"12.50"}'
+curl -s 'localhost:3000/api/v1/products?page=1&limit=10'
+curl -s 'localhost:3000/audit?resource=products&limit=5'
+```
+
+The write appears in `/audit` because the audit row is inserted in the same
+transaction as the product — that is the framework's default, not an add-on.
+
+## Path B — generate your own application
+
+From anywhere on your machine (standalone) or from the workspace root:
+
+```sh
+# Standalone (anywhere on your machine via bunx):
+bunx @framework/cli create my-api --with-demo
+# or directly from GitHub:
+bunx --package github:mohamedhabibwork/framework-cli#standalone framework create my-api --with-demo
+
+# Inside the framework monorepo workspace:
+bunx framework create apps/my-api --with-demo
+# (or: bun run cli -- create apps/my-api --with-demo)
+```
+
+One command generates the complete application from the template — config,
+bootstrap, providers, health/audit/realtime routes, server/worker/CLI entry
+points, tests, compose file, Dockerfile (plus `.env`, `.github/workflows/ci.yml`
+and `git init` when standalone) — installs dependencies, and runs `make:crud`
+inside the new app to add a sample **products** module with its migration and
+endpoint suite. Pass `--with-auth` to also scaffold session + personal API token
+authentication (`make:auth`), or `--dry-run` to preview the file plan first.
+If you omit the directory (`bunx @framework/cli create`), an interactive prompt
+asks for the application directory.
+
+Then:
+
+```sh
+cd my-api                                            # or cd apps/my-api inside the workspace
+cp .env.example .env                                 # DATABASE_URL / REDIS_URL (already copied for standalone)
+docker compose -f deployment/compose.yaml up -d --wait
+bun run cli -- db:migrate                            # apply the generated migration
+bun run dev                                          # http://127.0.0.1:3000
+bun test                                             # endpoint suite on an isolated DB
+```
+
+Optional processes:
+
+```sh
+bun run worker     # queue worker (same as: bun run cli -- queue:work)
+bun run schedule   # cron runner (when the app defines schedules)
+```
+
+Without `--with-demo` you get the empty application; add modules when ready:
+
+```sh
+bun run cli -- make:crud Product --module products \
+  --fields 'name:text:required,price:numeric:required' --access public --verify
+```
+
+`--verify` typechecks the generated code, runs the generated endpoint suite
+against an isolated, migrated PostgreSQL database, and reports every tested
+route. `--dry-run` previews every file change first. See the
+[CLI reference](cli-reference.md#makecrud-resource) for the full option list.
+
+## Path C — start a standalone application from the template
+
+You do not need the framework workspace to build on it. In addition to
+`bunx @framework/cli create my-api`, the released starter lives in
+[`mohamedhabibwork/framework-app`](https://github.com/mohamedhabibwork/framework-app)
+and resolves every `@framework/*` package from its published `#standalone`
+branch on GitHub, so it installs anywhere:
+
+```sh
+bunx @framework/cli create my-api --with-demo       # scaffold from template, install, git init, .env
+# or clone the template repository directly:
+bun create mohamedhabibwork/framework-app my-api   # clone, install, git init
+# or, with the GitHub CLI:
+gh repo create my-api --template mohamedhabibwork/framework-app --clone --private
+```
+
+Use the `owner/repo` form for `bun create`: Bun does not resolve a `github:`
+prefix for `bun create`. Any route gives you the same files that `create`
+generates.
+
+Then configure and start it exactly as in Path B:
+
+```sh
+cd my-api
+cp .env.example .env                                 # DATABASE_URL / REDIS_URL
+docker compose -f deployment/compose.yaml up -d --wait
+bun run cli -- make:crud Product --module products \
+  --fields 'name:text:required,price:numeric:required' --access public
+bun run cli -- db:migrate
+bun run dev
+```
+
+The template carries no demo module, so run `make:crud` (or any `make:*`
+generator) to add your first one. Verified on a clean machine: install,
+`bun run typecheck` and `bun run lint` pass out of the box; migrations and the
+endpoint suite need PostgreSQL from the compose file.
+
+## What you get
+
+| Surface                                        | Where               | Purpose                                                           |
+| ---------------------------------------------- | ------------------- | ----------------------------------------------------------------- |
+| `GET /health/live`, `GET /health/ready`        | `bootstrap/app.ts`  | Liveness (no dependencies) and readiness (database, cache, queue) |
+| `GET /audit`, `GET /audit/:id`                 | `@framework/crud`   | Filterable audit trail (actor, resource, correlation id, action)  |
+| `GET /ws`                                      | `@framework/events` | WebSocket multiplexer over the event bus                          |
+| `/api/v1/<module>` CRUD                        | generated modules   | Typed routes, OpenAPI metadata, pagination, validation            |
+| `bin/server.ts`, `bin/worker.ts`, `bin/cli.ts` | `bin/`              | HTTP server, queue worker, application CLI                        |
+
+Event channels: `entity.created|updated|deleted|restored`, `import.*`,
+`export.*` — published on the in-process bus by default, or fanned out across
+instances with `EVENTS_DRIVER=redis`.
+
+## Repository layout
+
+```text
+apps/<your-app>/
+├── app/modules/<feature>/   # business modules (schemas, repository, service, routes…)
+├── app/providers/           # your own providers (make:provider)
+├── app/jobs/                # queue job registry
+├── bootstrap/               # application, HTTP composition, middleware, OpenAPI
+├── config/                  # validated, environment-mapped configuration
+├── database/schema/         # canonical Drizzle tables (incl. framework audit_logs)
+├── database/migrations/     # reviewed SQL, applied by db:migrate
+├── routes/                  # API + health route composition
+└── bin/                     # server / worker / cli entry points
+```
+
+## When it does not start
+
+| Symptom                                           | Cause                                        | Fix                                                                                      |
+| ------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `/health/ready` returns `503 SERVICE_UNAVAILABLE` | Database or Redis is not reachable           | `bun run db:up`, then `docker compose -f deployment/compose.yaml ps`                     |
+| `db:migrate` cannot connect                       | `DATABASE_URL` missing or wrong port         | `cp .env.example .env`; the compose port is `54329`                                      |
+| Tests fail with "TEST_DATABASE_URL is required"   | No `.env.test`                               | `cp .env.test.example .env.test`; it must point at a test server, never the app database |
+| `EADDRINUSE :3000`                                | Another process owns the port                | `bun run cli -- serve --port 3001`                                                       |
+| CLI exits with `2`                                | Invalid usage (bad flag or missing argument) | `bun run cli -- <command> --help`                                                        |
+| CLI exits with `3`                                | Capability not supported by the backend      | The message names the missing provider or driver                                         |
+| `docs:build` complains about Node                 | Astro 7 needs Node ≥ 22.23.4                 | Build the docs with a newer Node; app code still runs on Bun                             |
+
+Two commands diagnose most of it:
+
+```sh
+bun run cli -- doctor --connections   # config validation + connectivity probes
+bun run cli -- config:show database   # resolved config, secrets redacted
+```
+
+## Next steps
+
+- [CLI reference](cli-reference.md) — every command and option
+- [Authoring modules](modules.md) — the schema → validation → DTO pipeline
+- [Platform guide](platform.md) — context, errors, audit, events, queues, import/export
+- [Testing](testing.md) — isolated databases and endpoint suites
+- [Deployment](deployment.md) — processes, migrations as a release step

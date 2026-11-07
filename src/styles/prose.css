@@ -1,0 +1,476 @@
+/*
+ * Prose layer — everything inside .sl-markdown-content plus the Starlight
+ * components used by the guides (cards, asides, link cards, badges).
+ *
+ * Goals: a comfortable measure, scannable headings, tables and code that never
+ * clip, and callouts that read as annotations rather than banners.
+ */
+
+.sl-markdown-content {
+  font-size: var(--text-body);
+  color: var(--text);
+}
+
+/* Reading measure applies to prose, not to tables and code: those need the
+ * full column so wide commands and dense tables stay legible. */
+.sl-markdown-content :is(p, li, blockquote, h5, h6) {
+  max-width: var(--measure);
+}
+
+.sl-markdown-content > * + * {
+  margin-block-start: 1.1em;
+}
+
+/* ---------------------------------------------------------------- headings */
+.sl-markdown-content :is(h2, h3, h4, h5, h6) {
+  color: var(--text);
+  text-wrap: balance;
+  scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem);
+}
+
+.sl-markdown-content h2 {
+  font-family: var(--fw-display);
+  font-size: var(--text-h2);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-variation-settings:
+    'SOFT' 0,
+    'WONK' 0,
+    'opsz' 72;
+  margin-block-start: 2.6em;
+  padding-block-end: 0.35em;
+  border-bottom: 1px solid var(--border);
+}
+
+.sl-markdown-content h3 {
+  font-size: var(--text-h3);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-block-start: 2em;
+}
+
+.sl-markdown-content h4 {
+  font-family: var(--fw-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-block-start: 1.8em;
+}
+
+.sl-markdown-content h5,
+.sl-markdown-content h6 {
+  font-size: var(--text-h4);
+  font-weight: 600;
+  margin-block-start: 1.6em;
+}
+
+/* Heading anchors: hidden until hover/focus, but always reachable by keyboard. */
+.sl-markdown-content .sl-anchor-link {
+  color: var(--text-dim);
+  opacity: 0;
+  transition:
+    opacity var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.sl-markdown-content :is(h2, h3, h4):hover .sl-anchor-link,
+.sl-markdown-content .sl-anchor-link:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- text */
+.sl-markdown-content p,
+.sl-markdown-content li {
+  color: var(--text);
+}
+
+.sl-markdown-content strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sl-markdown-content :is(p, li, td, th, dd, blockquote, aside) a:not(.sl-anchor-link) {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-decoration-thickness: 1px;
+  transition:
+    text-decoration-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.sl-markdown-content :is(p, li, td, th, dd, blockquote, aside) a:not(.sl-anchor-link):hover {
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 2px;
+}
+
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+  padding-inline-start: 1.35em;
+}
+
+.sl-markdown-content li + li {
+  margin-block-start: 0.35em;
+}
+
+.sl-markdown-content ul > li::marker {
+  color: var(--accent);
+}
+
+.sl-markdown-content ol > li::marker {
+  color: var(--text-dim);
+  font-family: var(--fw-mono);
+  font-size: 0.875em;
+}
+
+.sl-markdown-content blockquote {
+  margin-inline: 0;
+  padding: 0.15em 0 0.15em 1.1em;
+  border-inline-start: 2px solid var(--accent);
+  color: var(--text-muted);
+  font-family: var(--fw-display);
+  font-size: 1.0625em;
+  font-style: italic;
+}
+
+.sl-markdown-content hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin-block: 2.5em;
+}
+
+.sl-markdown-content img {
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.sl-markdown-content kbd {
+  font-family: var(--fw-mono);
+  font-size: 0.75em;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  background: var(--bg-raised);
+}
+
+/* ------------------------------------------------------------------ code */
+.sl-markdown-content :not(pre) > code {
+  font-family: var(--fw-mono);
+  font-size: 0.855em;
+  padding: 0.15em 0.38em;
+  border-radius: 5px;
+  background: var(--inline-bg);
+  color: var(--inline-text);
+  border: 1px solid var(--accent-border);
+  white-space: nowrap;
+  /* Long identifiers must not push the paragraph wide on mobile. */
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* Expressive Code frames: hairline border, no shadow stack, real scrolling. */
+.expressive-code {
+  max-width: 100%;
+  margin-block: 1.4em;
+}
+
+.expressive-code .frame {
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--code-border) !important;
+  box-shadow: var(--shadow-sm) !important;
+  background: var(--code-bg) !important;
+  --ec-frm-edBg: var(--code-bg);
+  --ec-frm-trmBg: var(--code-bg);
+}
+
+.expressive-code .frame pre {
+  font-family: var(--fw-mono) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.65 !important;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-radius: 0 !important;
+}
+
+.expressive-code .frame pre code {
+  font-variant-ligatures: none;
+}
+
+.expressive-code .frame .header,
+.expressive-code .frame .title {
+  font-family: var(--fw-mono) !important;
+  font-size: 0.75rem !important;
+  color: var(--text-muted) !important;
+  border-color: var(--code-border) !important;
+  background: color-mix(in oklab, var(--code-bg) 70%, var(--bg-raised)) !important;
+}
+
+.expressive-code .copy button {
+  border-radius: 5px !important;
+  border: 1px solid var(--code-border) !important;
+  background: var(--bg-raised) !important;
+}
+
+.expressive-code .copy button::before {
+  opacity: 0.7;
+}
+
+.expressive-code .copy button:hover::before {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------- tables */
+/* Tables scroll horizontally instead of clipping. The wrapper (added by the
+ * small enhancement script) only creates the scroll container and the ARIA
+ * region, so it must not add any visual box of its own — no layout shift. */
+.table-wrap {
+  margin-block: 1.4em;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.sl-markdown-content table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  font-size: 0.875rem;
+  margin: 0;
+  overflow: hidden;
+}
+
+.sl-markdown-content thead {
+  background: color-mix(in oklab, var(--bg-raised) 55%, var(--bg-sunken));
+}
+
+.sl-markdown-content th {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  text-align: start;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.sl-markdown-content td {
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  vertical-align: top;
+  color: var(--text);
+}
+
+.sl-markdown-content tr:last-child td {
+  border-bottom: 0;
+}
+
+.sl-markdown-content tbody tr:hover {
+  background: color-mix(in oklab, var(--accent-bg) 55%, transparent);
+}
+
+/* Inline code in a table must never break mid-identifier. */
+.sl-markdown-content :is(td, th) code {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* First column is usually an identifier or a label: keep it on one line. */
+.sl-markdown-content tbody :is(th, td):first-child {
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- asides */
+.starlight-aside {
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-inline-start-width: 3px;
+  padding: 0.9rem 1.1rem;
+  background: var(--bg-raised);
+  color: var(--text);
+  --sl-color-asides-text-accent: var(--text);
+}
+
+.starlight-aside--note {
+  border-inline-start-color: var(--jade);
+  background: color-mix(in oklab, var(--jade) 8%, var(--bg-raised));
+}
+
+.starlight-aside--tip {
+  border-inline-start-color: var(--jade);
+  background: color-mix(in oklab, var(--jade) 8%, var(--bg-raised));
+}
+
+.starlight-aside--caution {
+  border-inline-start-color: var(--ember);
+  background: color-mix(in oklab, var(--ember) 9%, var(--bg-raised));
+}
+
+.starlight-aside--danger {
+  border-inline-start-color: #e0574f;
+  background: color-mix(in oklab, #e0574f 9%, var(--bg-raised));
+}
+
+.starlight-aside__title {
+  font-family: var(--fw-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.starlight-aside__content a {
+  color: var(--accent);
+}
+
+.starlight-aside > * + * {
+  margin-block-start: 0.5em;
+}
+
+/* ------------------------------------------------------------ card grids */
+.card-grid {
+  gap: var(--space-4);
+  /* Starlight's `stagger` offsets every second card; equal rows read better
+   * and keep the baseline aligned. */
+  align-items: stretch;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 1.1rem 1.2rem;
+  gap: 0.5rem;
+  transition:
+    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.card:hover {
+  border-color: var(--accent-border);
+  background: color-mix(in oklab, var(--bg-raised) 88%, var(--accent-bg));
+  transform: translateY(-2px);
+}
+
+.card .title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text);
+  gap: 0.5rem;
+}
+
+.card .icon {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  padding: 0.3rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.card .body {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+/* ------------------------------------------------------------ link cards */
+.sl-link-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  padding: 0.9rem 1rem;
+  transition:
+    border-color var(--dur) var(--ease),
+    transform var(--dur) var(--ease);
+}
+
+.sl-link-card:hover {
+  border-color: var(--accent-border);
+  transform: translateY(-1px);
+}
+
+.sl-link-card .title {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sl-link-card .description {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* ---------------------------------------------------------------- badges */
+.sl-badge {
+  font-family: var(--fw-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------------------- details */
+.sl-markdown-content details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  background: var(--bg-raised);
+}
+
+.sl-markdown-content details summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.sl-markdown-content details[open] summary {
+  margin-block-end: 0.6rem;
+}
+
+/* --------------------------------------------------------------- mobile */
+@media (max-width: 50rem) {
+  .sl-markdown-content {
+    font-size: 0.9688rem;
+  }
+
+  .sl-markdown-content h2 {
+    margin-block-start: 2.1em;
+  }
+
+  .table-wrap {
+    margin-inline: -0.25rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .expressive-code .frame pre {
+    font-size: 0.78rem !important;
+  }
+}

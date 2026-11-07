@@ -1,0 +1,220 @@
+---
+title: Mail
+description: 'Validated email messages, a fluent composer and pluggable transports.'
+---
+
+# Mail
+
+What it is, how to register it, and how to send validated email from your
+application.
+
+`@framework/mail` gives you a `Mailer` service with a fluent composer, zod
+validation before any transport sees a message, and a transport seam that keeps
+delivery pluggable. Message construction is separate from transport: the mailer
+applies your default From address, validates every message, then hands the
+normalized result to one configured transport.
+
+## Setup
+
+### Configuration
+
+Compose the mail section into your application's config schema. The driver
+defaults to `console`; `from` must always be configured and must be a valid
+email address:
+
+```ts
+import { mailConfigSchema } from '@framework/mail';
+import { z } from 'zod/v4';
+
+const configSchema = z.object({
+  mail: mailConfigSchema,
+  // …the rest of your configuration
+});
+```
+
+The validated shape is `{ driver: 'console' | 'memory', from }`:
+
+```jsonc
+{
+  "mail": {
+    "driver": "console",
+    "from": "no-reply@example.com",
+  },
+}
+```
+
+### Provider registration
+
+`createMailProvider` registers the configured transport and the `Mailer` bound
+to it as singletons. Add it to your application's provider list:
+
+```ts
+import { createMailProvider } from '@framework/mail';
+import type { AppConfig } from './config';
+
+export const mailProvider = createMailProvider<AppConfig>();
+```
+
+The provider reads `config.mail` and resolves the driver for you:
+
+- `console` — a `ConsoleMailTransport` that writes one redacted JSON log line
+  per message (development).
+- `memory` — a `MemoryMailTransport` that records every message verbatim in
+  memory (tests).
+
+To override the transport entirely — a custom driver or a DI-provided one —
+pass it explicitly:
+
+```ts
+const mailProvider = createMailProvider<AppConfig>({ transport: myTransport });
+```
+
+Anything in your code resolves the mailer through its token:
+
+```ts
+import { MAILER } from '@framework/mail';
+
+const mailer = app.container.resolve(MAILER);
+```
+
+## Sending mail
+
+### The fluent composer
+
+`mailer.to(...)` starts a chain that reads like the message it produces. Every
+method returns the composer; `send()` validates and delivers:
+
+```ts
+await mailer
+  .to('ada@example.com')
+  .cc(['grace@example.com'])
+  .replyTo('support@example.com')
+  .subject('Welcome')
+  .text('Hello Ada')
+  .send();
+```
+
+Use `html()` instead of (or in addition to) `text()` for rich bodies, and
+`headers()` for custom headers. Use `from()` to override the configured default
+From for one message.
+
+### Direct send
+
+For messages built at runtime, call `send()` with a plain object. A single
+address or a non-empty list is accepted everywhere; recipients are normalized
+to arrays:
+
+```ts
+await mailer.send({
+  from: 'billing@example.com',
+  to: ['ada@example.com', 'grace@example.com'],
+  subject: 'Invoice #42',
+  html: '<p>Your invoice is ready.</p>',
+});
+```
+
+Both calls resolve to the same result: an array of `SentMessage` records, each
+carrying the transport's delivery `id` and the `accepted` recipient addresses.
+The `Mailer` surfaces the bound transport's capability flags via
+`mailer.capabilities` (`{ html, batch }`) so callers can adapt to what the
+transport supports.
+
+## Validation
+
+Every message is validated before a transport sees it. Addresses are trimmed
+and lower-cased and must be valid emails, the subject is required (up to the
+998-character line limit), and exactly one body rule applies: `text`, `html`,
+or both — never neither.
+
+An invalid message throws `MailValidationError` with 422-style field errors you
+can render directly:
+
+```ts
+import { MailValidationError } from '@framework/mail';
+
+try {
+  await mailer.to('ada@example.com').subject('No body').send();
+} catch (error) {
+  if (error instanceof MailValidationError) {
+    // error.code === 'MAIL_VALIDATION_FAILED'
+    // error.fields: [{ path: 'body', message: 'Either a text or an html body is required', code: 'custom' }]
+  }
+}
+```
+
+You can validate without sending via `parseMailMessage` or the
+`mailMessageSchema` zod schema; both are exported.
+
+## Transports
+
+### Console (development)
+
+The `ConsoleMailTransport` writes one JSON log entry per message in the
+support-logger shape (`message: 'mail.sent'`). Bodies are redacted to byte
+sizes — reset tokens and invoices must never reach logs — so the entry carries
+`subject`, recipients and `textBytes`/`htmlBytes` only. Messages are accepted,
+not delivered; the log line is the delivery record.
+
+### Memory (testing)
+
+`MemoryMailTransport` is the documented fake: it records every delivered
+message verbatim so tests assert on exactly what the `Mailer` produced.
+
+```ts
+import { MemoryMailTransport } from '@framework/mail';
+
+const transport = new MemoryMailTransport();
+const mailer = new Mailer(transport, { from: 'no-reply@example.com' });
+
+await mailer.to('ada@example.com').subject('Hi').text('Hello').send();
+transport.sent(); // every delivered message, oldest first
+transport.clear(); // reset between tests
+```
+
+`failNext(error)` arms a one-shot failure: the next `send` throws it and
+consumes it, letting you exercise your error handling. A failed message never
+enters `sent()`.
+
+### Custom transports
+
+Implement the `MailTransport` interface — a `capabilities` object
+(`{ html, batch }`) and a `send(messages)` method that receives already
+validated, normalized messages and returns `SentMessage` records — then pass it
+to `createMailProvider({ transport })`. Transport failures thrown by your
+driver are wrapped as `MailTransportError` (code `MAIL_TRANSPORT_FAILED`) with
+the original error preserved as `cause` for logging and retry decisions.
+
+## Queues and notifications
+
+The `Mailer` deliberately stays out of the queue business: queue hand-off is an
+integration point with `@framework/queue` (see [Queues](/queues/)). If you need
+multi-channel delivery, a persisted status ledger or queued retries, use the
+[Notifications](/notifications/) package — its `email` channel delivers through
+this same `Mailer`, so the email transport stays owned here.
+
+## SMTP
+
+The SMTP transport is planned but deliberately not implemented: an SMTP
+dependency has to be chosen first so real-transport integration tests can prove
+delivery behavior. Until then the drivers are `console` | `memory`, and
+`mailConfigSchema` rejects anything else — an invalid driver is a configuration
+error, not a silent fallback.
+
+## Testing
+
+Use the `memory` driver (or inject a `MemoryMailTransport`) and assert on
+`transport.sent()`:
+
+```ts
+const transport = new MemoryMailTransport();
+const mailer = new Mailer(transport, { from });
+
+transport.failNext(new Error('relay down'));
+await expect(mailer.to('ada@example.com').subject('Hi').text('Hello').send()).rejects.toMatchObject({
+  code: 'MAIL_TRANSPORT_FAILED',
+});
+expect(transport.sent()).toHaveLength(0); // the failed message never recorded
+```
+
+For the console transport, the write function is injectable, so tests capture
+log lines and assert on the redacted entries without touching `console`.

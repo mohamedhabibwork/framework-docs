@@ -1,0 +1,44 @@
+---
+title: Architecture decisions
+description: 'Runtime, adapter and version decisions with their compatibility matrix.'
+---
+
+# Architecture Decisions (Phase 0)
+
+## Compatibility matrix
+
+| Component              | Pinned version    | Notes                                                   |
+| ---------------------- | ----------------- | ------------------------------------------------------- |
+| Bun                    | 1.4.2             | Only validated runtime                                  |
+| TypeScript             | 5.9.3             | `tsc` type checking only (`noEmit`)                     |
+| Hono                   | 4.13.12           |                                                         |
+| @hono/zod-validator    | 0.9.1             | peer: zod ^4, hono ≥4.11.2                              |
+| zod                    | 4.6.5             | `z.toJSONSchema` used for OpenAPI                       |
+| drizzle-orm            | 0.45.3            | latest stable (1.0 is RC; not adopted)                  |
+| drizzle-kit            | 0.31.11           | migration generation/check only                         |
+| drizzle-zod            | 0.8.3             | standalone package behind `@framework/database` adapter |
+| postgres (postgres-js) | 3.4.9             |                                                         |
+| PostgreSQL             | 17 (alpine image) | `deployment/compose.yaml`, port 54329 on loopback       |
+| Biome                  | 2.5.15            | lint + format                                           |
+
+## Decisions
+
+**ADR-1 Bun first.** The starter used Bun; all scripts, tests and the server entry run on Bun. Node support needs its own adapter and test matrix and is not selectable (`create --runtime node` is planned).
+
+**ADR-2 `bun test` instead of Vitest.** The spec names Vitest. Bun's runner is already the runtime, needs no config, and supports JUnit output used by `make:crud --verify`. This is a deliberate deviation; the `test` command delegates to `project.tools.test`, so switching runners is an adapter change.
+
+**ADR-3 Standalone drizzle-zod behind an adapter.** Upstream docs show `drizzle-orm/zod` with a release-candidate install. Per spec we pinned stable `drizzle-zod@0.8.3` and route all imports through `@framework/database` (`src/schema/zod.ts`), so moving to `drizzle-orm/zod` is a one-file change.
+
+**ADR-4 String-mode timestamps + ISO normalization.** Generated tables use `mode: 'string'` timestamps so JSON transport never goes through `z.date()`. PostgreSQL text (`2026-10-03 22:27:19+00`) is normalized to ISO-8601 by `toIsoTimestamp` in response serializers. Soft deletion writes `now()` in SQL so it works for both Date- and string-mode columns.
+
+**ADR-5 Error boundary is `onError`.** Hono catches downstream exceptions before they return through `await next()`; the kernel installs `onError`/`notFound` and never relies on try/catch around `next()`. Postgres unique/foreign-key violations (23505/23503) map to 409; 5xx messages are generic unless debug is on outside production.
+
+**ADR-6 Explicit registration with markers.** Modules, providers, routes and OpenAPI operations are registered explicitly. Generators add imports syntax-aware (after the last import statement) and list entries after `// @framework:*` markers; missing markers and duplicates are errors.
+
+**ADR-7 Mixins as constrained class expressions.** `Readable/Creatable/Updatable/Deletable/SoftDeletable` wrap `RepositoryCore<typeof table>`. `CrudTable` intentionally has no column index signature so stacked mixins keep the concrete row types; collisions (e.g. Deletable + SoftDeletable) throw at definition time.
+
+**ADR-8 Explicit public access.** The spec forbids silently generating public access. `make:crud` therefore requires `--access public` (or a definition file / interactive answer) — a deviation from the spec's bare examples, which would otherwise have to invent an access policy. `authenticated` exits 3 until Phase 3.
+
+**ADR-9 Migrations are a release step.** `db:migrate` takes a PostgreSQL advisory lock on a reserved connection (pool ≥ 2, enforced) and is never run on server/worker startup. Test databases are created per run (`fw_test_*`), migrated, and dropped in success and failure paths.
+
+**ADR-10 Workspace layout.** This repository is the framework workspace (`packages/*`, `apps/playground`). The playground is the reference application and the template the generator's end-to-end gate copies into `.tmp/` to verify generated code.

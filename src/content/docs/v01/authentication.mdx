@@ -1,0 +1,290 @@
+---
+title: Authentication
+description: 'Session and personal API token authentication with @framework/auth: hashing, guards, throttling and the /auth endpoints.'
+---
+
+# Authentication
+
+`@framework/auth` gives you a complete authentication stack out of the box:
+opaque session cookies for browsers, ability-scoped personal API tokens for
+machines, argon2id password hashing and per-email login throttling. The
+framework owns the `users`, `sessions` and `api_tokens` tables, so you never
+model them yourself — you compose the module and start authenticating.
+
+## How it works
+
+- **Two guards, consulted in order.** By default the session cookie is tried
+  first, then the `Authorization: Bearer` token. The first match wins and one
+  lookup runs per request.
+- **Nothing usable is stored.** Session and token values are random strings
+  (`fw_sess_…`, `fw_pat_…`); only their SHA-256 hashes reach the database, so a
+  leaked database never yields working credentials.
+- **Identity resolves before your handlers run.** The HTTP kernel calls the
+  auth guard through its `resolveActor` hook, so the request's execution
+  context — `currentActor()` and your logs included — already carries the real
+  user.
+
+## Setup
+
+Generate the auth module — it scaffolds the module files, adds the
+`@framework/auth` dependency and the `create-auth-tables` migration:
+
+```bash
+bun run cli -- make:auth
+# make:auth --guards session,api-token   pick guards explicitly
+# make:auth --dry-run                    preview files and migration first
+```
+
+Review the migration, then apply it:
+
+```bash
+bun run cli -- db:migrate
+```
+
+The generator wires two pieces for you. The provider registers the hasher,
+user provider, session/token stores and the `AuthService` in the container:
+
+```ts
+// app/modules/auth/provider.ts
+export const authProvider = createAuthProvider<AppConfig>();
+```
+
+The routes mount every `/auth` endpoint, with CSRF configured to your CORS
+origins:
+
+```ts
+// app/modules/auth/routes.ts
+import { AUTH_SERVICE, defineAuthRoutes } from '@framework/auth';
+import { csrf } from 'hono/csrf';
+
+export const authRoutes = (config: Pick<AppConfig, 'auth' | 'http'>) =>
+  defineAuthRoutes({
+    service: AUTH_SERVICE,
+    session: config.auth.session,
+    csrf: csrf({ origin: [...config.http.corsOrigins] }),
+  });
+```
+
+Compose both into your bootstrap — the auth provider must come after the
+database provider, and after the cache provider when you want login throttling
+(see `/cache/`):
+
+```ts
+// bootstrap/http.ts
+export const http = createHttpKernel(app, { resolveActor: authActorResolver(app) }).route(
+  '/api/v1/auth',
+  authRoutes(config),
+);
+```
+
+Finally, add the `auth` section to your config schema. `authConfigSchema`
+supplies every default:
+
+```ts
+auth: authConfigSchema,
+```
+
+| Key                       | Default                    | Meaning                                            |
+| ------------------------- | -------------------------- | -------------------------------------------------- |
+| `guards`                  | `['session', 'api-token']` | Guards consulted in order; first match wins        |
+| `session.cookie`          | `fw_session`               | Cookie carrying the opaque token                   |
+| `session.ttlSeconds`      | `604800` (7 days)          | Sliding session lifetime                           |
+| `session.secure`          | `false`                    | Emit the `Secure` attribute — enable in production |
+| `token.ttlSeconds`        | `2592000` (30 days)        | Default token lifetime; `null` never expires       |
+| `rateLimit.enabled`       | `true`                     | Master switch for login throttling                 |
+| `rateLimit.maxAttempts`   | `5`                        | Failed logins per email per window                 |
+| `rateLimit.windowSeconds` | `60`                       | Fixed-window length; the counter expires with it   |
+
+## Usage
+
+### Register and log in
+
+Credentials are only ever accepted as JSON. A successful registration creates
+the user, hashes the password with argon2id and immediately sets a session
+cookie:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.test","password":"correct horse battery"}'
+```
+
+```json
+{
+  "user": {
+    "id": "7f6c…",
+    "name": "Ada",
+    "email": "ada@example.test",
+    "emailVerifiedAt": null,
+    "createdAt": "…",
+    "updatedAt": "…"
+  }
+}
+```
+
+The response is `201` and carries `Set-Cookie: fw_session=…; HttpOnly;
+SameSite=Lax; Path=/; Max-Age=604800`. The password hash never leaves the
+server — `publicUser` projects only safe fields. Failures are structured:
+`422 VALIDATION_FAILED` with `error.fields` for bad input, and `409
+UNIQUE_VIOLATION` for a duplicate email.
+
+Login works the same way and returns `200` with a fresh session cookie;
+wrong credentials answer `401 UNAUTHENTICATED`. `GET /auth/me` returns the
+authenticated identity — note the `via` field telling you which guard won:
+
+```json
+{ "user": { "…": "…" }, "via": "session", "abilities": ["*"] }
+```
+
+`POST /auth/logout` (204) revokes the credential that authenticated the
+request — the session for cookie callers, the token for Bearer callers — and
+clears the cookie. The old value stops working immediately.
+
+### Protect your routes
+
+`requireAuth()` rejects anonymous requests with 401. `requireAbility()`
+additionally checks the principal's abilities — anonymous requests get 401,
+authenticated-but-unable requests get 403:
+
+```ts
+import { requireAbility, requireAuth } from '@framework/auth';
+
+// resolve(c, EXECUTION_CONTEXT).actor is the authenticated user on both routes.
+http
+  .get('/profile', requireAuth(), (c) => c.json(resolve(c, EXECUTION_CONTEXT).actor))
+  .get('/notes-only', requireAbility('notes.view'), (c) => c.text('granted'));
+```
+
+For resource-style authorization, `@framework/http` ships the policy layer:
+`authenticatedPolicy` (every ability granted to any authenticated principal),
+`denyAll` (the deny-by-default base), `authorize(policy, ability)`, plus
+`currentPrincipal(c)` and `hasAbility(principal, ability)` for ad-hoc checks.
+CRUD resources generated with `--access authenticated` get exactly this wiring.
+
+### Personal API tokens
+
+Tokens are the machine-facing counterpart of sessions. Issue one for the
+authenticated user:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/tokens \
+  -H 'content-type: application/json' \
+  -H 'cookie: fw_session=…' \
+  -d '{"name":"ci","abilities":["notes.view"]}'
+```
+
+```json
+{ "token": { "id": "…", "name": "ci", "abilities": ["notes.view"], "…": "…" }, "value": "fw_pat_9f2c…" }
+```
+
+The plaintext `value` appears exactly once, in this response — only its hash is
+persisted. The token authenticates like a session, via
+`authorization: Bearer fw_pat_9f2c…`. Two properties to rely on:
+
+- **Abilities deny what they do not grant.** A token scoped to `notes.view`
+  passes `requireAbility('notes.view')` but gets 403 on `orders.view`. Session
+  principals hold `['*']`, which grants everything.
+- **Revocation is ownership-checked and immediate.** `DELETE /auth/tokens/:id`
+  (204) revokes only a token belonging to the caller; anything else is 404. The
+  revoked value stops resolving on the very next request.
+
+## Advanced
+
+### Session mechanics
+
+The cookie value is `fw_sess_` plus 256 bits of entropy; the database stores
+only `sha256(token)` as `token_hash`. Expiry is filtered in SQL
+(`expires_at > now()`), so expired sessions never resolve.
+
+- **Sliding expiry.** Every authenticated use extends the session to a full
+  `ttlSeconds` window — an active user never times out. Renewal is throttled to
+  at most one `UPDATE` per 60 seconds (`SESSION_TOUCH_INTERVAL_MS`), so the
+  window does not cost a write per request.
+- **Fresh tokens per login.** Every login issues a brand-new token through
+  `SessionStore.create`. For explicit credential rotation the store exposes
+  `rotate(currentToken, ttlSeconds)`, which deletes the old session and inserts
+  its replacement in a single transaction — the atomic swap primitive behind
+  the framework's rotation story.
+- **Housekeeping.** `prune()` deletes expired sessions (returning the count),
+  `countExpired()` reports them without deleting, and `revokeAllForUser()` is
+  the "log me out everywhere" switch.
+
+### Swapping the user provider
+
+The `UserProvider` contract is three methods — `findById`, `findByEmail` and
+`create` (which must persist the already-hashed password). Applications with a
+custom user store implement it and hand it to the `AuthService` directly; any
+implementation satisfying the contract works:
+
+```ts
+const service = new AuthService({
+  hasher: new BunPasswordHasher(),
+  users: myCustomUserProvider,
+  sessions: new PgSessionStore(connection),
+  tokens: new PgTokenStore(connection),
+  sessionTtlSeconds: config.auth.session.ttlSeconds,
+  tokenTtlSeconds: config.auth.token.ttlSeconds,
+});
+```
+
+### Password hashing
+
+`BunPasswordHasher` uses Bun's native argon2id; hashes embed their salt and
+parameters, so verification needs no sidecar metadata. Unknown emails verify
+against a pre-computed dummy hash, making an unknown address cost the same as a
+known one — login timing does not reveal who is registered.
+
+### Login throttling
+
+Throttling counts **failures only**, per lowercased email, in a fixed window
+backed by the cache rate limiter. One limiter check per login serves as both
+the pre-verification gate and the failure registration; a successful login
+resets the counter, so legitimate users never burn their allowance with
+successes. Blocked callers get `429 TOO_MANY_REQUESTS` with a `Retry-After`
+header (seconds) **before** any credential work happens.
+
+Throttling is active only when both conditions hold: a cache `RateLimiter` is
+bound (the auth provider republishes it as `AUTH_RATE_LIMITER`) and
+`rateLimit.enabled` is true. Either missing leaves the endpoint unlimited — an
+explicit configuration choice, never a silent bypass.
+
+### CSRF
+
+The native Hono CSRF middleware guards the cookie flows (`register`, `login`,
+`logout`) only. Bearer-token routes are immune to CSRF, so they accept plain
+JSON clients without an origin check — and JSON logins are never challenged
+either, since Hono only inspects form-encoded content types. Browser clients
+should pass `csrf({ origin: [...config.http.corsOrigins] })` as the generator
+does.
+
+### What ships later
+
+Email verification, password recovery, one-time passwords and JWT guards are
+planned but not shipped — the deferred scope is tracked separately, and nothing
+here silently half-implements it.
+
+## Testing
+
+The package's own suite is your reference. Use `@framework/testing` for an
+isolated database, apply the three table definitions from
+`packages/auth/tests/routes.test.ts`, and drive the kernel directly:
+
+```ts
+const http = createHttpKernel(app, { resolveActor: authActorResolver(app) }).route(
+  '/auth',
+  defineAuthRoutes({ service: AUTH_SERVICE, session: config.auth.session }),
+);
+
+const response = await http.request('/auth/login', {
+  method: 'POST',
+  body: JSON.stringify({ email: 'ada@example.test', password: 'correct horse battery' }),
+  headers: { 'content-type': 'application/json' },
+});
+expect(response.status).toBe(200);
+```
+
+Extract the cookie from `set-cookie` for cookie flows and pass
+`authorization: 'Bearer …'` for token flows. Stable assertions to copy: 401
+with `UNAUTHENTICATED` for bad credentials, 403 for a token lacking the ability,
+429 with an integer `Retry-After` on throttled logins, and 404 when revoking a
+token the caller does not own.

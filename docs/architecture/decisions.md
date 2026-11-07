@@ -1,0 +1,55 @@
+# Architecture Decisions (Phase 0)
+
+## Compatibility matrix
+
+| Component              | Pinned version    | Notes                                                   |
+| ---------------------- | ----------------- | ------------------------------------------------------- |
+| Bun                    | 1.4.2             | Only validated runtime                                  |
+| TypeScript             | 7.0.2             | `tsc` type checking only (`noEmit`)                     |
+| Hono                   | 4.13.13           |                                                         |
+| @hono/zod-validator    | 0.9.1             | peer: zod ^4, hono ≥4.11.2                              |
+| zod                    | 4.6.5             | `z.toJSONSchema` used for OpenAPI                       |
+| drizzle-orm            | 0.45.4            | latest stable (1.0 is RC; not adopted)                  |
+| drizzle-kit            | 0.31.11           | migration generation/check only                         |
+| drizzle-zod            | 0.8.3             | standalone package behind `@framework/database` adapter |
+| postgres (postgres-js) | 3.4.9             |                                                         |
+| PostgreSQL             | 17 (alpine image) | `deployment/compose.yaml`, port 54329 on loopback       |
+| Biome                  | 2.5.15            | lint + format                                           |
+
+## Decisions
+
+**ADR-1 Bun first.** The starter used Bun; all scripts, tests and the server entry run on Bun. Node support needs its own adapter and test matrix and is not selectable (`create --runtime node` is planned).
+
+**ADR-2 `bun test` instead of Vitest.** The spec names Vitest. Bun's runner is already the runtime, needs no config, and supports JUnit output used by `make:crud --verify`. This is a deliberate deviation; the `test` command delegates to `project.tools.test`, so switching runners is an adapter change.
+
+**ADR-3 Standalone drizzle-zod behind an adapter.** Upstream docs show `drizzle-orm/zod` with a release-candidate install. Per spec we pinned stable `drizzle-zod@0.8.3` and route all imports through `@framework/database` (`src/schema/zod.ts`), so moving to `drizzle-orm/zod` is a one-file change.
+
+**ADR-4 String-mode timestamps + ISO normalization.** Generated tables use `mode: 'string'` timestamps so JSON transport never goes through `z.date()`. PostgreSQL text (`2026-10-03 22:27:19+00`) is normalized to ISO-8601 by `toIsoTimestamp` in response serializers. Soft deletion writes `now()` in SQL so it works for both Date- and string-mode columns.
+
+**ADR-5 Error boundary is `onError`.** Hono catches downstream exceptions before they return through `await next()`; the kernel installs `onError`/`notFound` and never relies on try/catch around `next()`. Postgres unique/foreign-key violations (23505/23503) map to 409; 5xx messages are generic unless debug is on outside production.
+
+**ADR-6 Explicit registration with markers.** Modules, providers, routes and OpenAPI operations are registered explicitly. Generators add imports syntax-aware (after the last import statement) and list entries after `// @framework:*` markers; missing markers and duplicates are errors.
+
+**ADR-7 Mixins as constrained class expressions.** `Readable/Creatable/Updatable/Deletable/SoftDeletable` wrap `RepositoryCore<typeof table>`. `CrudTable` intentionally has no column index signature so stacked mixins keep the concrete row types; collisions (e.g. Deletable + SoftDeletable) throw at definition time.
+
+**ADR-8 Explicit public access.** The spec forbids silently generating public access. `make:crud` therefore requires `--access public` (or a definition file / interactive answer) — a deviation from the spec's bare examples, which would otherwise have to invent an access policy. `authenticated` exits 3 until Phase 3.
+
+**ADR-9 Migrations are a release step.** `db:migrate` takes a PostgreSQL advisory lock on a reserved connection (pool ≥ 2, enforced) and is never run on server/worker startup. Test databases are created per run (`fw_test_*`), migrated, and dropped in success and failure paths.
+
+**ADR-10 Workspace layout.** This repository is the framework workspace (`packages/*`, `apps/playground`). The playground is the reference application and the template the generator's end-to-end gate copies into `.tmp/` to verify generated code.
+
+**ADR-11 Kit adapters over `@mohamedhabibwork` packages.** Cache, storage, queue transport and logging delegate to the user's published kits (`@mohamedhabibwork/cachekit`, `storagekit`, `queuekit`, `loggerkit` — pinned exact versions), keeping the framework's application-facing contracts, providers and tokens stable. Capabilities are mapped from each kit's capability reports rather than faked: where a kit reports an operation unsupported (e.g. cachekit's Redis tags/namespace-clear, queuekit 0.4.1's missing job-inspection surface), the framework surfaces the limitation or keeps a documented direct path — never reimulates. Hand-rolled internals are deleted once delegated; framework-owned seams (path guard, job contracts, worker scopes, batch bookkeeping, redaction) stay.
+
+> **Note on numbering.** ADR-12…ADR-15 are **reserved** by the T-series plan (Feature Builder, kit abstraction layer, Node runtime adapter, `db:rollback` forward-only) and are authored by their owning tasks (T04/T02/T20). The Laravel-package-equivalent work below uses **ADR-16…ADR-21**.
+
+**ADR-16 OAuth2 authorization server as a first-class package.** Laravel's Passport is a PHP package; the equivalent is implemented in TypeScript as `@framework/oauth-server` (OAuth2 RFC 6749 + PKCE RFC 7636 + introspection RFC 7662 + revocation RFC 7009 + authorization-server metadata RFC 8414) over `jose` and `node:crypto`. **Access tokens are JWT-format, signed with the framework JWKS**, so the existing `jwt` guard verifies them unchanged (set `auth.jwt.jwksUri`/inline `keys` to the server's JWKS); opaque tokens are supported via introspection. Identity is **reused** from `@framework/auth` (`UserProvider`, session guard) — no second user/session store. Grants (`authorization_code`+PKCE, `client_credentials`, `refresh_token`) are Strategy implementations; stores are narrow repository contracts; zero new runtime dependencies.
+
+**ADR-17 Prompts as a zero-dependency, non-interactive-first CLI prompt library.** Laravel Prompts' equivalent is `@framework/prompts` (`text`, `confirm`, `select`, `multiselect`, `password`, `spinner`) built on `node:readline` + `process.stdin` raw mode with a line-mode fallback — no third-party prompt library. **Rendering is separated from resolution**: a `PromptSession` resolves answers from (1) an injected answers map, (2) the `default`, (3) a validator error, and only then (4) the TTY. `--no-interaction`/`--json` force paths (1)/(2); a required prompt with no default exits `2` (`EXIT.USAGE`); Ctrl-C exits `130` (`EXIT.INTERRUPTED`). `@framework/cli` depends on it (never the reverse).
+
+**ADR-18 Driver-based search with a memory + Postgres driver.** Laravel Scout's equivalent is `@framework/search`: `SearchEngine` is a port; the `memory` (dev/tests) and `postgres` (tsvector + GIN, `ts_rank`) drivers ship first. External backends (Meilisearch, Typesense) are **documented optional-peer adapter seams kept external in `bun build`** — named and bounded, not implemented in this cut. Indexing is **queued by default** over `@framework/queue`, wired from the existing `EventBus` (`<channel>.created|updated|deleted|restored`) — no new bus or worker; `indexing: 'inline'` is available for dev/tests. Soft-delete awareness is mandatory (a delete removes from the index; a restore re-adds). Capabilities are reported honestly (`CAPABILITY_UNSUPPORTED`, never faked).
+
+**ADR-19 Outbound social login distinct from the inbound JWT/JWK guard.** Laravel Socialite's equivalent is `@framework/socialite` (Google + GitHub drivers over native `fetch`, with `jose` verifying OIDC `id_token`). This is **outbound** provider integration: the `jwt` guard performs **inbound** verification of tokens presented _to_ the API, whereas Socialite obtains tokens _from_ third parties and always terminates in a **framework session/API token** (`AuthService.startSession`) — a provider token is never accepted as a framework credential. `state` + PKCE guard the redirect/callback; account linking to local users is explicit configuration (`linkByEmail`, verified-email required), never a silent merge. No second identity store.
+
+**ADR-20 Observatory is a dev observability dashboard, not a tracing pipeline.** Laravel Telescope's equivalent is `@framework/observatory`: in-app, per-request, dev-time inspection with watchers (request, query, job, event, exception, mail, cache) and a local store (memory for dev + Postgres). It is **not** the planned OpenTelemetry tracing/metrics/OTLP work (M7) and does not duplicate it — it reuses the same instrumentation seams (a query observer, the kernel `report` hook) but owns no exporter. Retention/pruning is explicit (`observatory:prune` + schedule). Dashboard routes are **never public by default** (ADR-8): disabled outside dev/test unless `observatory.enabled` is explicitly true and always mounted behind an authorization guard. UI is server-rendered `hono/jsx` + a JSON API (no frontend build).
+
+**ADR-21 demo-api auth integration via the existing `make:auth` path.** `apps/demo-api` gains authentication through the **same** generator/plan the playground and generated apps use (`make:auth --guards session,api-token`): it adds the `@framework/auth` dependency, the `app/modules/auth` module, the config section, the schema exports, the provider, the kernel `resolveActor` guard and the `/api/v1/auth` mount, and generates the auth-tables migration (a release step, ADR-9). No bespoke wiring — the generator's change set is the contract, proven by a smoke suite. This keeps one integration path across the reference app, the generated-app gate and the demo app.

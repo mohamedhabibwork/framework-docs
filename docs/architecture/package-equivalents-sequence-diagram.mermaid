@@ -1,0 +1,124 @@
+%% Package equivalents — program call flows
+%% Companion to docs/architecture/laravel-package-equivalents.md
+%% (a) OAuth2 authorization_code + PKCE   (b) social-login redirect->callback->session   (c) queued index write -> search read
+
+%% ───────────────────────────── (a) OAuth2 authorization_code + PKCE ─────────────────────────────
+sequenceDiagram
+    autonumber
+    actor User
+    participant Client as OAuth Client
+    participant Kernel as Hono Kernel (resolveActor)
+    participant Auth as @framework/auth guard
+    participant Server as AuthorizationServer
+    participant Consent as OAuthConsentStore
+    participant Code as OAuthCodeStore
+    participant TokenEP as /oauth/token
+    participant Grant as AuthorizationCodeGrant
+    participant Issuer as JwtTokenIssuer (jose)
+    participant Store as OAuthTokenStore
+
+    User->>Client: sign in to app
+    Client->>Kernel: GET /oauth/authorize?response_type=code&client_id&redirect_uri&scope&code_challenge&state
+    Kernel->>Auth: resolveActor(cookie)
+    Auth-->>Kernel: Principal (session)
+    Kernel->>Server: authorize(req, principal)
+    Server->>Consent: grantedScopes(userId, clientId)
+    Consent-->>Server: [] (first time)
+    Server-->>User: render consent screen (guarded)
+    User->>Server: approve scopes
+    Server->>Consent: grant(userId, clientId, scopes)
+    Server->>Code: issue({ clientId, userId, redirectUri, scopes, codeChallenge })
+    Code-->>Server: plaintext code
+    Server-->>Client: 302 redirect_uri?code=...&state=...
+
+    Client->>TokenEP: POST /oauth/token (grant_type=authorization_code, code, code_verifier, client_id[, client_secret])
+    TokenEP->>Grant: handle(req, deps)
+    Grant->>Grant: client auth (confidential: verifySecret) OR PKCE S256(code_verifier)==code_challenge
+    Grant->>Code: consume(code, clientId)
+    Code-->>Grant: OAuthCodeRecord (single-use)
+    Grant->>Issuer: issue(claims{ sub, client_id, scope, aud, iss })
+    Issuer-->>Grant: access_token (JWT, framework JWKS)
+    Grant->>Store: issueAccess(...) / issueRefresh(...)
+    Store-->>Grant: persisted (hashed)
+    Grant-->>TokenEP: { access_token, token_type: Bearer, expires_in, refresh_token, scope }
+    TokenEP-->>Client: 200 JSON
+
+    Note over Client,Auth: Resource server verifies the access_token with the EXISTING jwt guard — no new code.
+    Client->>Auth: GET /api/v1/me  (Authorization: Bearer <access_token>)
+    Auth->>Auth: jwtVerify(access_token, framework JWKS) -> scope claim -> abilities -> sub -> local user
+    Auth-->>Client: 200 (principal via 'jwt')
+
+%% ───────────────────────────── (b) Social-login redirect -> callback -> session ─────────────────────────────
+sequenceDiagram
+    autonumber
+    actor Browser
+    participant Routes as socialite routes
+    participant Manager as SocialiteManager
+    participant Cache as @framework/cache (state store)
+    participant Provider as GoogleProvider (fetch)
+    participant Accounts as SocialAccountStore
+    participant Users as @framework/auth UserProvider
+    participant Auth as AuthService
+
+    Browser->>Routes: GET /api/v1/auth/social/google/redirect
+    Routes->>Manager: driver('google')
+    Manager-->>Routes: SocialProvider
+    Routes->>Routes: generate state + PKCE code_verifier
+    Routes->>Cache: set('socialite:state:<state>', verifier, TTL)
+    Routes-->>Browser: 302 accounts.google.com/o/oauth2/v2/auth?...&state&code_challenge
+
+    Browser->>Routes: GET /api/v1/auth/social/google/callback?code&state
+    Routes->>Cache: consume('socialite:state:<state>')
+    Cache-->>Routes: verifier (or null -> 400 SOCIAL_STATE_MISMATCH)
+    Routes->>Provider: exchangeCode({ code, codeVerifier })
+    Provider-->>Routes: { access_token, id_token }
+    Routes->>Provider: fetchUser(access_token, id_token)  (id_token verified via jose)
+    Provider-->>Routes: SocialUser { id, email, emailVerified, name }
+    Routes->>Accounts: find('google', SocialUser.id)
+    alt account already linked
+        Accounts-->>Routes: { userId }
+    else first login
+        Routes->>Users: findByEmail(email)
+        alt email matches verified local user (linkByEmail)
+            Users-->>Routes: UserRecord
+            Routes->>Accounts: link('google', SocialUser.id, user.id)
+        else create new user (no password) + link
+            Routes->>Users: create({ name, email, passwordHash: random })
+            Routes->>Accounts: link('google', SocialUser.id, user.id)
+        end
+    end
+    Routes->>Auth: startSession(userId)
+    Auth-->>Routes: { sessionId, sessionToken }
+    Routes->>Browser: setCookie(fw_session, sessionToken) + 302 to app
+    Note over Browser,Auth: Outbound provider token is NEVER an API credential. All existing session auth / /me / policies / 2FA apply unchanged.
+
+%% ───────────────────────────── (c) Queued index write -> search read ─────────────────────────────
+sequenceDiagram
+    autonumber
+    participant Controller as ResourceController
+    participant Service as ResourceService
+    participant Repo as CrudRepository
+    participant Bus as EventBus (@framework/events)
+    participant Indexer as Indexer (@framework/search)
+    participant Queue as QueueManager (@framework/queue)
+    participant Worker as JobWorker
+    participant Engine as SearchEngine (postgres)
+    participant Reader as GET /search/products
+
+    Controller->>Service: create(dto)
+    Service->>Repo: create(values)
+    Repo-->>Service: entity (committed)
+    Service->>Bus: publish('products.created', payload)
+    Bus->>Indexer: handler(event)  [subscribed to products.created]
+    Indexer->>Queue: add('search.index', { index:'products', doc })
+    Note over Indexer,Queue: queued by default; indexing:'inline' skips the queue (dev/tests)
+    Queue->>Worker: run job (own scope + execution context)
+    Worker->>Engine: upsert('products', [doc])
+    Engine-->>Worker: ok
+    Worker-->>Queue: done
+
+    Note over Service,Engine: soft-delete aware: products.deleted -> Engine.remove([id]); products.restored -> upsert again.
+
+    Reader->>Engine: search('products', { q, where })
+    Engine->>Engine: to_tsquery + ts_rank (GIN index)
+    Engine-->>Reader: SearchResult -> paginate() -> Page<SearchHit>

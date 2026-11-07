@@ -1,0 +1,341 @@
+---
+title: Workflows
+description: 'Durable multi-step runs with checkpoints, pipelines, parallel groups, sagas and wait-for-event stages.'
+---
+
+# Workflows
+
+Some processes are too big for a single job: they span steps, need to survive
+restarts, wait for external events, and undo side effects when something
+fails halfway. `@framework/workflow` gives you durable workflows — a
+Workflow → Pipeline → Stage → Action tree persisted in Postgres, executed
+through the queue, where every transition is a conditional store update.
+Crashed workers and redelivered jobs converge on one outcome instead of
+double-executing.
+
+Actions are the atomic units of work. Stages are the checkpoint boundaries:
+a stage completes — and its output persists — only when every action beneath
+it reached a terminal state. Pipelines are ordered stage sequences; a
+workflow runs its pipelines one after another.
+
+## Setup
+
+Install the provider in your application's bootstrap. It requires `DATABASE`
+and `QUEUE` and uses `EVENT_BUS` when present:
+
+```ts
+import { workflowProvider } from '@framework/workflow';
+
+// providers: [..., workflowProvider]
+```
+
+Declare actions and compose them into a workflow. The zod `input` validates
+at dispatch and seeds the run state; each action's output merges back into
+that state:
+
+```ts
+import { defineAction, defineStage, defineWorkflow } from '@framework/workflow';
+import { z } from 'zod/v4';
+
+const charge = defineAction({
+  name: 'charge',
+  input: z.object({ orderId: z.string() }), // the slice of state it consumes
+  attempts: 3, // total tries (default 3)
+  backoffMs: 1_000, // backoff base (default 1s)
+  timeoutMs: 30_000, // per-attempt timeout (default 5 minutes)
+  async run(input, ctx) {
+    await ctx.progress(50);
+    return { charged: true, paymentId: await bill(input.orderId) };
+  },
+});
+
+export const orderFulfillment = defineWorkflow({
+  name: 'order-fulfillment', // lowercase, no dots
+  version: 1,
+  input: z.object({ orderId: z.string() }),
+  stages: [reserveStock, defineStage({ name: 'pay', actions: [charge] }), ship],
+});
+```
+
+Definitions are validated structurally at registration (naming rules,
+duplicate action names, empty stages — violations throw `WORKFLOW_INVALID`),
+registered on the manager (duplicates fail at boot), and the worker needs
+the engine's internal jobs merged into its own `JobWorker`, so one process
+consumes one queue:
+
+```ts
+application.container.resolve(WORKFLOW_MANAGER).register(orderFulfillment);
+
+const engine = new WorkflowEngine(application, manager, queue, bus);
+const worker = new JobWorker(queue, application, [...jobs, ...engine.jobs]);
+worker.start();
+engine.start(); // arms the wait bridge and the wait-timeout sweep
+```
+
+## Dispatching and observing
+
+Dispatch by registered name or by definition, with the current execution
+context:
+
+```ts
+const manager = scope.resolve(WORKFLOW_MANAGER);
+const { runId } = await manager.dispatch('order-fulfillment', { orderId }, scope.resolve(EXECUTION_CONTEXT));
+
+const status = await manager.status(runId);
+// status.run.status, status.nodes — the full pipeline/stage/action tree
+```
+
+Invalid input is rejected before a run is created (`WORKFLOW_INPUT_INVALID`);
+an unknown name throws `WORKFLOW_UNKNOWN`, and registering the same name at
+a different version throws `WORKFLOW_VERSION_CONFLICT`.
+
+Every stage and action publishes progress on the event bus: once on the
+aggregate `workflow` channel and once on `workflow.run.{runId}`, which
+WebSocket dashboards subscribe to.
+
+## Pipelines
+
+For workflows with distinct phases, declare `pipelines` instead of `stages`.
+Pipelines run sequentially; each is checkpointed on its own subtree, and a
+pipeline can also be dispatched standalone (it is wrapped into a version-1
+workflow automatically):
+
+```ts
+import { definePipeline, defineWorkflow } from '@framework/workflow';
+
+const checkout = definePipeline({
+  name: 'checkout',
+  stages: [reserveStock, pay],
+});
+const fulfillment = definePipeline({
+  name: 'fulfillment',
+  stages: [pack, ship],
+});
+
+export const orderFlow = defineWorkflow({
+  name: 'order-flow',
+  version: 1,
+  input: z.object({ orderId: z.string() }),
+  pipelines: [checkout, fulfillment],
+});
+
+await manager.dispatch(checkout, { orderId }, ctx); // pipelines are dispatchable on their own
+```
+
+A stage without `actions` gets a convenience implicit action named
+`<stage>#run` that calls the stage's `run(state, ctx)` — handy for
+single-step stages.
+
+## Parallel and queued placement
+
+Within a stage, actions run sequentially by default; `parallel` groups run
+concurrently (`Promise.all`) and the stage resumes once every member is
+terminal. The `via` option controls where work executes:
+
+- `via: 'inline'` (default) runs inside the parent's unit job — stages run
+  inside their pipeline's job, actions inside their stage's job.
+- `via: 'queue'` dispatches the node as its own queue job — useful for heavy
+  steps. The parent parks and resumes through a checkpoint advance when the
+  child settles. Pipeline nodes always execute as queued jobs.
+
+```ts
+import { defineStage, parallel } from '@framework/workflow';
+
+const shipping = defineStage({
+  name: 'shipping',
+  via: 'queue',
+  actions: parallel([printLabel, defineAction({ name: 'notify', via: 'queue', run: async () => null })]),
+});
+```
+
+## Gates: when and precheck
+
+`when` inspects the state and skips the action (or whole stage) without
+running it — skipped nodes count as completed. `precheck` validates an
+invariant just before execution — a throw fails the node with
+`PRECHECK_FAILED` before any side effect happened:
+
+```ts
+const gate = defineStage({
+  name: 'capture',
+  precheck: (state) => {
+    if (!state.reserved) throw new Error('stock was not reserved');
+  },
+  when: (state) => state.total > 0,
+  actions: [charge],
+});
+```
+
+## How state merges
+
+The validated input seeds the run state. Every node's output then merges
+into it with a shallow Postgres `jsonb` concat — last writer wins per key:
+
+- an **object** output merges as-is;
+- a **scalar or array** output nests under the node's key
+  (`{ 'charge': 4200 }`);
+- `null`/`undefined` writes nothing.
+
+Actions with an `input` schema receive only their validated slice of the
+state, which keeps each step's contract explicit.
+
+## The action context
+
+Handlers receive a context with the run's identity and controls:
+
+```ts
+const example = defineAction({
+  name: 'example',
+  async run(state, ctx) {
+    ctx.runId; // run id
+    ctx.nodeId; // this action's node id
+    ctx.attempt; // 1-based attempt number
+    ctx.signal; // AbortSignal — aborted when the attempt times out
+    ctx.state; // the merged run state
+    await ctx.progress(75); // emit a progress event for dashboards
+    return null;
+  },
+});
+```
+
+## Timeouts and retries
+
+| Scope               | Default    | Notes                                                              |
+| ------------------- | ---------- | ------------------------------------------------------------------ |
+| Action attempt      | 5 minutes  | `timeoutMs` per action; aborts via the context signal              |
+| Inline retries      | 3 attempts | `attempts`/`backoffMs`; sleeps `backoffMs × attempt` between tries |
+| Queued action retry | 3 attempts | each try is its own queue job attempt (500 ms exponential backoff) |
+| Wait stage          | 24 hours   | `waitFor.timeoutMs`; a periodic sweep fails expired waits          |
+| Unit job            | 30 minutes | the internal `__workflow.unit` job timeout                         |
+
+A failed inline attempt requeues the node (`running → pending`, error
+recorded); an exhausted queued action fails the node and cascades. The
+framework's own defaults are the ones its test suite pins — change them
+per action, not globally.
+
+## Failure, compensation and halt
+
+By default a workflow is a saga. When a stage fails, the run enters
+`compensating`, walks completed actions **newest-first** and calls each
+one's `compensate`; a compensation error is logged and never halts the walk.
+The run ends `compensated` with the triggering error attached:
+
+```ts
+const refund = defineAction({
+  name: 'refund',
+  async run(input) {
+    return { refunded: await payments.refund(input.paymentId) };
+  },
+  async compensate(state) {
+    await payments.voidRefund(state.paymentId);
+  },
+});
+```
+
+Set `onFailure: 'halt'` instead when side effects should stand — the run
+simply fails and nothing is undone.
+
+## Waiting for events
+
+A `waitFor` stage parks the whole run in `waiting` until a domain event of
+that type arrives on the event bus (matching is exact event type; the
+engine subscribes on the event's channel automatically, re-arming after
+restarts). The `pick` function extracts the persisted output — by default
+the event payload. After `timeoutMs` the sweep fails the stage and the
+failure cascade applies (a timed-out wait triggers compensation like any
+failure):
+
+```ts
+const waitPayment = defineStage({
+  name: 'wait-payment',
+  waitFor: {
+    event: 'payment.succeeded',
+    timeoutMs: 10 * 60_000,
+    pick: (event) => event.payload, // stored into run state
+  },
+});
+```
+
+## Run and node statuses
+
+Runs move through `pending → running → completed | failed | cancelled |
+compensating → compensated`; a parked run is `waiting`. Nodes (pipelines,
+stages, actions) track `pending`, `running`, `waiting`, `skipped`,
+`completed`, `failed` and `compensated`. The status page and admin API show
+both levels; `workflow:status <runId>` prints the node tree with attempts
+and errors.
+
+## Operating runs
+
+The manager (and the HTTP admin API below) can steer runs at any time:
+
+```ts
+await manager.cancel(runId); // pending/running/waiting → cancelled
+await manager.retry(runId); // re-run a failed run from its failure point
+await manager.retry(runId, { fromNode: 'order-fulfillment.pay.charge' });
+await manager.resume(runId); // force-satisfy a parked wait
+await manager.prune(30); // drop terminal runs older than 30 days
+```
+
+`retry` resets only the failed node's subtree — completed work outside it is
+kept, and compensated actions stay compensated (re-dispatch the workflow
+instead if its side effects were undone). `resume` satisfies the park with
+an empty payload; the event-driven path above is the normal way through.
+Prune removes terminal runs past your retention window (playground default
+7 days, `WORKFLOW_RETENTION_DAYS`). For dashboards, mount the admin API:
+
+```ts
+import { workflowRoutes } from '@framework/workflow';
+
+app.route('/workflow', workflowRoutes({ authorize: requireAbility('workflows.manage') }));
+```
+
+| Endpoint                       | Purpose                                                     |
+| ------------------------------ | ----------------------------------------------------------- |
+| `GET /workflow`                | Paginated runs, filterable by workflow, status, correlation |
+| `GET /workflow/:runId`         | One run with its full node tree                             |
+| `POST /workflow/:runId/retry`  | Re-run from the failure point (optional `fromNode`)         |
+| `POST /workflow/:runId/cancel` | Cancel a pending/running/waiting run                        |
+| `POST /workflow/:runId/resume` | Force-satisfy a parked wait                                 |
+| `POST /workflow/dispatch`      | Dispatch a registered workflow by name                      |
+
+The admin API is unprotected unless you pass `authorize` — back it with
+[Authentication](/authentication/) (`requireAbility`) in any non-local
+deployment.
+
+## Progress events
+
+Every transition emits an event with `{ runId, … }` on both the `workflow`
+channel and `workflow.run.{runId}`: `started`, `stage.completed`,
+`stage.failed`, `action.completed` (with `attempt`, or `progress` from
+`ctx.progress`), `action.failed`, `action.skipped`, `action.compensated`,
+`waiting`, `resumed`, `compensating`, and the terminal `completed`,
+`compensated`, `failed`, `cancelled`. Publish domain events with the same
+bus shape the wait stages listen on — see [Events](/platform/).
+
+From the shell, `workflow:list` paginates runs (filter by workflow, status,
+correlation), `workflow:status <runId>` prints the node tree,
+`workflow:retry <runId> --from <node path>`, `workflow:cancel <runId>` and
+`workflow:prune --days <n>` round out operations (see the
+[CLI reference](/cli-reference/)). Workflows compose with the rest of the
+framework: cron fires them via [Scheduling](/scheduling/), steps can
+delegate heavy work through [Queues](/queues/), and the same testing
+discipline applies — see [Testing](/testing/).
+
+## Testing
+
+Workflows settle asynchronously, so poll `manager.status` until the run is
+terminal. With a `MemoryEventBus` you can also wake wait stages by
+publishing directly:
+
+```ts
+const { runId } = await manager.dispatch(orderFulfillment, { orderId: 'o-1' }, ctx);
+const run = await settle(runId); // your polling helper
+expect(run.status).toBe('completed');
+
+await bus.publish({ id: crypto.randomUUID(), type: 'payment.succeeded', payload: { paymentId: 'p-9' } /* ... */ });
+```
+
+The framework's suite runs workflows against real Postgres and Redis
+([Testing](/testing/)); assert on final state, on the node tree, and on the
+order compensations ran in.
