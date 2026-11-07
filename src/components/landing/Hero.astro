@@ -43,12 +43,12 @@ const version = formatLine(docsVersions.latest);
 			<span class="terminal-dot"></span>
 			<span class="terminal-label">zsh — my-api</span>
 		</div>
-		<pre><code><span class="prompt">$</span> <span class="cmd">bun run cli -- create apps/my-api --with-demo</span>
+		<pre><code><span class="prompt">$</span> <span class="cmd">bunx @framework/cli create my-api --with-demo</span>
 <span class="ok">✔</span> application scaffolded        <span class="comment">config, providers, routes, bins</span>
 <span class="ok">✔</span> products module generated     <span class="comment">9 artifacts + migration</span>
 <span class="ok">✔</span> endpoint suite green           <span class="comment">real PostgreSQL</span>
 
-<span class="prompt">$</span> <span class="cmd">bun run cli -- db:migrate && bun run dev</span>
+<span class="prompt">$</span> <span class="cmd">cd my-api && bun run cli -- db:migrate && bun run dev</span>
 <span class="url">➜ http://127.0.0.1:3000</span>          <span class="comment">/health/ready · /api/v1/products</span>
 
 <span class="prompt">$</span> <span class="caret" aria-hidden="true"></span></code></pre>

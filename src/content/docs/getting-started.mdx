@@ -49,23 +49,34 @@ transaction as the product — that is the framework's default, not an add-on.
 
 ## Path B — generate your own application
 
-From the workspace root:
+From anywhere on your machine (standalone) or from the workspace root:
 
 ```sh
-bun run cli -- create apps/my-api --with-demo
+# Standalone (anywhere on your machine via bunx):
+bunx @framework/cli create my-api --with-demo
+# or directly from GitHub:
+bunx --package github:mohamedhabibwork/framework-cli#standalone framework create my-api --with-demo
+
+# Inside the framework monorepo workspace:
+bunx framework create apps/my-api --with-demo
+# (or: bun run cli -- create apps/my-api --with-demo)
 ```
 
-One command generates the complete application — config, bootstrap, providers,
-health/audit/realtime routes, server/worker/CLI entry points, tests, compose
-file — installs dependencies through the workspace, and runs `make:crud` inside
-the new app to add a sample **products** module with its migration and endpoint
-suite.
+One command generates the complete application from the template — config,
+bootstrap, providers, health/audit/realtime routes, server/worker/CLI entry
+points, tests, compose file, Dockerfile (plus `.env`, `.github/workflows/ci.yml`
+and `git init` when standalone) — installs dependencies, and runs `make:crud`
+inside the new app to add a sample **products** module with its migration and
+endpoint suite. Pass `--with-auth` to also scaffold session + personal API token
+authentication (`make:auth`), or `--dry-run` to preview the file plan first.
+If you omit the directory (`bunx @framework/cli create`), an interactive prompt
+asks for the application directory.
 
 Then:
 
 ```sh
-cd apps/my-api
-cp .env.example .env                                 # DATABASE_URL / REDIS_URL
+cd my-api                                            # or cd apps/my-api inside the workspace
+cp .env.example .env                                 # DATABASE_URL / REDIS_URL (already copied for standalone)
 docker compose -f deployment/compose.yaml up -d --wait
 bun run cli -- db:migrate                            # apply the generated migration
 bun run dev                                          # http://127.0.0.1:3000
@@ -93,19 +104,23 @@ route. `--dry-run` previews every file change first. See the
 
 ## Path C — start a standalone application from the template
 
-You do not need the framework workspace to build on it. The released starter
-lives in [`mohamedhabibwork/framework-app`](https://github.com/mohamedhabibwork/framework-app)
+You do not need the framework workspace to build on it. In addition to
+`bunx @framework/cli create my-api`, the released starter lives in
+[`mohamedhabibwork/framework-app`](https://github.com/mohamedhabibwork/framework-app)
 and resolves every `@framework/*` package from its published `#standalone`
 branch on GitHub, so it installs anywhere:
 
 ```sh
+bunx @framework/cli create my-api --with-demo       # scaffold from template, install, git init, .env
+# or clone the template repository directly:
 bun create mohamedhabibwork/framework-app my-api   # clone, install, git init
 # or, with the GitHub CLI:
 gh repo create my-api --template mohamedhabibwork/framework-app --clone --private
 ```
 
-Use the `owner/repo` form: Bun does not resolve a `github:` prefix for
-`bun create`. Either route gives you the same files that `create` generates.
+Use the `owner/repo` form for `bun create`: Bun does not resolve a `github:`
+prefix for `bun create`. Any route gives you the same files that `create`
+generates.
 
 Then configure and start it exactly as in Path B:
 

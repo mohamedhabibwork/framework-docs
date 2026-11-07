@@ -82,7 +82,7 @@ on the text path.
 | project    | `build`               | Compile production binaries with `bun build --compile` into dist/                      |
 |            | `config:check`        | Validate configuration without starting HTTP or workers                                |
 |            | `config:show`         | Show resolved configuration with secrets redacted                                      |
-|            | `create`              | Generate a new application into an empty directory                                     |
+|            | `create`              | Generate a new application from the starter template into an empty directory           |
 |            | `dev`                 | Start the runtime's development watcher                                                |
 |            | `doctor`              | Validate configuration and, with --connections, database connectivity                  |
 |            | `help`                | Show help for a command, or a summary of all commands                                  |
@@ -126,25 +126,30 @@ Status is the catalog's own classification; `planned` commands exit with code
 
 ## Project
 
-### `create <directory>`
+### `create [directory]`
 
-Generate a complete application into an empty directory.
+Generate a complete application from the starter template into an empty directory. When `directory` is omitted on an interactive terminal, the CLI prompts for it.
 
-| Option                                         | Effect                                                                                          |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `--with-demo`                                  | Also generate a sample `products` module (files + migration) via `make:crud` inside the new app |
-| `--no-install`                                 | Skip dependency installation (also skips `--with-demo`)                                         |
-| `--template`, `--runtime`, `--package-manager` | Only `api` / `bun` / `bun` are validated                                                        |
+| Option                                         | Effect                                                                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--with-demo`                                  | Also generate a sample `products` module (files + migration) via `make:crud` inside the new app      |
+| `--with-auth`                                  | Also install session + personal API token authentication (`make:auth`) inside the new app            |
+| `--no-install`                                 | Skip dependency installation (also skips `--with-demo` and `--with-auth`)                            |
+| `--git` / `--no-git`                           | Initialize (or skip) a fresh Git repository (`git init -b main`; enabled by default when standalone) |
+| `--dry-run`                                    | Preview generated files and setup steps without writing to disk                                      |
+| `--template`, `--runtime`, `--package-manager` | Only `api` / `bun` / `bun` are validated                                                             |
 
 ```sh
+# Standalone (anywhere on your machine):
+bunx @framework/cli create inventory-api --with-demo
+bunx --package github:mohamedhabibwork/framework-cli#standalone framework create inventory-api --with-demo --with-auth
+
+# Inside the framework monorepo workspace:
+bunx framework create apps/inventory-api --with-demo
 bun run cli -- create apps/inventory-api --with-demo
 ```
 
-Generated apps are workspace members: `@framework/*` resolves through the
-framework workspace after a root `bun install` (run automatically unless
-`--no-install`). Outside the workspace, start from the published template
-instead: `bun create mohamedhabibwork/framework-app my-api`
-([Getting started](/getting-started/#path-c--start-a-standalone-application-from-the-template)).
+When run inside the framework monorepo, generated apps are workspace members (`@framework/*` resolves through `workspace:*` after a root `bun install`). When run outside the workspace, `create` produces a standalone application that resolves `@framework/*` from `github:mohamedhabibwork/framework-*#standalone`, copies `.env.example` to `.env`, adds `.github/workflows/ci.yml`, and initializes Git ([Getting started](/getting-started/#path-c--start-a-standalone-application-from-the-template)).
 
 ### `help [command]`, `list [--json]`
 

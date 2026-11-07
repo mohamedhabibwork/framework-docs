@@ -61,21 +61,20 @@ import PackagePills from '../../components/landing/PackagePills.astro';
   <div class="paths">
     <article class="path">
       <span class="path-step">Path A — standalone</span>
-      <h3>Clone the template repository</h3>
+      <h3>Scaffold from the template via CLI</h3>
       <p>
-        A standalone application with its own git history, Dockerfile and compose file. Framework packages resolve from
-        GitHub.
+        Create a fresh standalone application anywhere on your machine with its own git history, Dockerfile, compose
+        file and `.env`. Framework packages resolve from GitHub.
       </p>
       <pre>
         <code>
-          <span class="prompt">$</span> gh repo create my-api --template mohamedhabibwork/framework-app --clone
-          <span class="prompt">$</span> cd my-api &amp;&amp; bun install
-          <span class="prompt">$</span> cp .env.example .env
+          <span class="prompt">$</span> bunx @framework/cli create my-api --with-demo
+          <span class="prompt">$</span> cd my-api
           <span class="prompt">$</span> docker compose -f deployment/compose.yaml up -d --wait
           <span class="prompt">$</span> bun run cli -- db:migrate &amp;&amp; bun run dev
         </code>
       </pre>
-      <a href="/getting-started/#path-a--run-the-reference-application-playground">
+      <a href="/getting-started/#path-c--start-a-standalone-application-from-the-template">
         Follow the standalone walkthrough
         <svg
           width="14"
@@ -101,11 +100,11 @@ import PackagePills from '../../components/landing/PackagePills.astro';
         <code>
           <span class="prompt">$</span> bun install
           <span class="prompt">$</span> bun run db:up
-          <span class="prompt">$</span> bun run cli -- create apps/my-api --with-demo
+          <span class="prompt">$</span> bunx framework create apps/my-api --with-demo
           <span class="prompt">$</span> cd apps/my-api &amp;&amp; bun run dev
         </code>
       </pre>
-      <a href="/getting-started/#path-b--generate-your-own-application-one-command">
+      <a href="/getting-started/#path-b--generate-your-own-application">
         Follow the workspace walkthrough
         <svg
           width="14"
